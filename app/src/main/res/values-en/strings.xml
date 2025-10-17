@@ -43,6 +43,18 @@
     <string name="server_proxy_label">Proxy Address</string>
     <string name="server_proxy_placeholder">e.g. http://127.0.0.1:8080</string>
 
+    <string name="routing_settings">Routing Mode</string>
+    <string name="routing_settings_subtitle">Choose global or per-app routing</string>
+    <string name="routing_dialog_title">Routing</string>
+    <string name="routing_mode_global">Global proxy (all apps use VPN)</string>
+    <string name="routing_mode_global_hint">Global routing is enabled. Every app will use the VPN tunnel.</string>
+    <string name="routing_mode_whitelist">Whitelist (only selected apps use VPN)</string>
+    <string name="routing_mode_blacklist">Blacklist (selected apps bypass VPN)</string>
+    <string name="routing_app_list_whitelist">Select the apps that should use the VPN:</string>
+    <string name="routing_app_list_blacklist">Select the apps that should bypass the VPN:</string>
+    <string name="routing_loading_apps">Loading installed apps…</string>
+    <string name="routing_empty_apps">No eligible apps found.</string>
+
     <string name="vpn_test">Test</string>
     <string name="vpn_testing">Testing...</string>
     <string name="test_result_latency">%1$d ms</string>

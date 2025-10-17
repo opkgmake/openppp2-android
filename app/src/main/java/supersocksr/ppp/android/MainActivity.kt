@@ -121,6 +121,7 @@ class MainActivity : PppVpnActivity() {
     val rawReader = RawReader(resources)
     val encryptionPreferences = settings.getEncryptionPreferences()
     val serverProxy = settings.getServerProxy()
+    val routingPreferences = settings.getRoutingPreferences()
     val config = VPNLinkConfiguration().apply {
       SubnetAddress = "255.255.255.0"
       IPAddress = selectedUserConfig.value!!.tun_address.toString()
@@ -140,8 +141,25 @@ class MainActivity : PppVpnActivity() {
 
       BypassIpList = rawReader.readRawResource(R.raw.ip)
       DNSRuleList = rawReader.readRawResource(R.raw.domain)
-      AllowedApplicationPackageNames.add(packageName)
-      DisallowedApplicationPackageNames.add(packageName)
+      AllowedApplicationPackageNames.clear()
+      DisallowedApplicationPackageNames.clear()
+      when (routingPreferences.mode) {
+        RoutingMode.GLOBAL -> {
+          // No explicit package routing; all apps use VPN by default.
+        }
+
+        RoutingMode.WHITELIST -> {
+          routingPreferences.whitelist
+            .filter { it.isNotBlank() }
+            .forEach { AllowedApplicationPackageNames.add(it) }
+        }
+
+        RoutingMode.BLACKLIST -> {
+          routingPreferences.blacklist
+            .filter { it.isNotBlank() }
+            .forEach { DisallowedApplicationPackageNames.add(it) }
+        }
+      }
 
       VPNConfiguration.apply {
         key.apply {

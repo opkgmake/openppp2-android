@@ -43,6 +43,18 @@
     <string name="server_proxy_label">代理地址</string>
     <string name="server_proxy_placeholder">例如：http://127.0.0.1:8080</string>
 
+    <string name="routing_settings">路由模式</string>
+    <string name="routing_settings_subtitle">配置全局或分应用代理</string>
+    <string name="routing_dialog_title">路由设置</string>
+    <string name="routing_mode_global">全局代理（全部应用走代理）</string>
+    <string name="routing_mode_global_hint">当前为全局代理模式，所有应用都会经过 VPN。</string>
+    <string name="routing_mode_whitelist">白名单模式（仅选中的应用走代理）</string>
+    <string name="routing_mode_blacklist">黑名单模式（选中的应用不走代理）</string>
+    <string name="routing_app_list_whitelist">请选择需要通过代理的应用：</string>
+    <string name="routing_app_list_blacklist">请选择需要直连的应用：</string>
+    <string name="routing_loading_apps">正在加载应用列表…</string>
+    <string name="routing_empty_apps">没有可配置的应用。</string>
+
     <string name="vpn_test">测试</string>
     <string name="vpn_testing">测试中…</string>
     <string name="test_result_latency">%1$d 毫秒</string>

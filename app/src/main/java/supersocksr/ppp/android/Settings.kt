@@ -4,11 +4,14 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
 import android.widget.Toast
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -19,7 +22,10 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -31,14 +37,23 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.alorma.compose.settings.ui.SettingsGroup
 import com.alorma.compose.settings.ui.SettingsMenuLink
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import supersocksr.ppp.android.openppp2.PackageX
+import supersocksr.ppp.android.openppp2.i.PackageInformation
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.lazy.items
+import androidx.compose.ui.graphics.Color
 
 
 const val TEST_LINK_KEY = "test_link"
@@ -55,6 +70,9 @@ const val ENCRYPTION_PROTOCOL_SECRET_KEY = "encryption_protocol_secret"
 const val ENCRYPTION_TRANSPORT_KEY = "encryption_transport"
 const val ENCRYPTION_TRANSPORT_SECRET_KEY = "encryption_transport_secret"
 const val SERVER_PROXY_KEY = "server_proxy"
+const val ROUTING_MODE_KEY = "routing_mode"
+const val ROUTING_ALLOWED_PACKAGES_KEY = "routing_allowed_packages"
+const val ROUTING_DISALLOWED_PACKAGES_KEY = "routing_disallowed_packages"
 
 const val DEFAULT_ENCRYPTION_KF = 0x09362737
 const val DEFAULT_ENCRYPTION_KX = 128
@@ -65,6 +83,25 @@ const val DEFAULT_ENCRYPTION_PROTOCOL_SECRET = "N6HMzdUs7IUnYHwq"
 const val DEFAULT_ENCRYPTION_TRANSPORT = "aes-256-cfb"
 const val DEFAULT_ENCRYPTION_TRANSPORT_SECRET = "HWFweXu2g5RVMEpy"
 const val DEFAULT_SERVER_PROXY = ""
+const val DEFAULT_ROUTING_MODE = "global"
+
+enum class RoutingMode(val storageValue: String) {
+  GLOBAL("global"),
+  WHITELIST("whitelist"),
+  BLACKLIST("blacklist");
+
+  companion object {
+    fun fromStorage(value: String?): RoutingMode {
+      return values().firstOrNull { it.storageValue == value } ?: GLOBAL
+    }
+  }
+}
+
+data class RoutingPreferences(
+  val mode: RoutingMode = RoutingMode.GLOBAL,
+  val whitelist: Set<String> = emptySet(),
+  val blacklist: Set<String> = emptySet(),
+)
 
 data class EncryptionPreferences(
   val kf: Int = DEFAULT_ENCRYPTION_KF,
@@ -87,6 +124,7 @@ class Settings(val context: Context, private val preferences: SharedPreferences)
     val state = rememberLazyListState()
     var encryptionDialogOpened by remember { mutableStateOf(false) }
     var serverProxyDialogOpened by remember { mutableStateOf(false) }
+    var routingDialogOpened by remember { mutableStateOf(false) }
     var testOptionsDialogOpened by remember { mutableStateOf(false) }
     var logDialogOpened by remember { mutableStateOf(false) }
 
@@ -116,6 +154,13 @@ class Settings(val context: Context, private val preferences: SharedPreferences)
           ) {
             serverProxyDialogOpened = true
           }
+
+          SettingsMenuLink(
+            title = { Text(context.getString(R.string.routing_settings)) },
+            subtitle = { Text(context.getString(R.string.routing_settings_subtitle)) }
+          ) {
+            routingDialogOpened = true
+          }
         }
 
         SettingsGroup(
@@ -142,6 +187,9 @@ class Settings(val context: Context, private val preferences: SharedPreferences)
         }
         if (serverProxyDialogOpened) {
           ServerProxyDialog { serverProxyDialogOpened = false }
+        }
+        if (routingDialogOpened) {
+          RoutingDialog { routingDialogOpened = false }
         }
         if (testOptionsDialogOpened) {
           TestOptionsDialog { testOptionsDialogOpened = false }
@@ -193,6 +241,21 @@ class Settings(val context: Context, private val preferences: SharedPreferences)
 
   fun saveServerProxy(value: String) {
     preferences.edit().putString(SERVER_PROXY_KEY, value).apply()
+  }
+
+  fun getRoutingPreferences(): RoutingPreferences {
+    val mode = RoutingMode.fromStorage(preferences.getString(ROUTING_MODE_KEY, DEFAULT_ROUTING_MODE))
+    val whitelist = preferences.getStringSet(ROUTING_ALLOWED_PACKAGES_KEY, emptySet())?.toSet() ?: emptySet()
+    val blacklist = preferences.getStringSet(ROUTING_DISALLOWED_PACKAGES_KEY, emptySet())?.toSet() ?: emptySet()
+    return RoutingPreferences(mode = mode, whitelist = whitelist, blacklist = blacklist)
+  }
+
+  fun saveRoutingPreferences(routingPreferences: RoutingPreferences) {
+    preferences.edit()
+      .putString(ROUTING_MODE_KEY, routingPreferences.mode.storageValue)
+      .putStringSet(ROUTING_ALLOWED_PACKAGES_KEY, routingPreferences.whitelist.toSet())
+      .putStringSet(ROUTING_DISALLOWED_PACKAGES_KEY, routingPreferences.blacklist.toSet())
+      .apply()
   }
 
   private fun parseFlexibleInt(text: String): Int {
@@ -422,6 +485,209 @@ class Settings(val context: Context, private val preferences: SharedPreferences)
         Button(
           onClick = {
             saveServerProxy(serverProxy.text.trim())
+            Toast.makeText(context, context.getString(R.string.toast_saved_success), Toast.LENGTH_SHORT).show()
+            onDismiss()
+          }
+        ) {
+          Text(context.getString(R.string.save))
+        }
+      },
+      dismissButton = {
+        Button(onClick = onDismiss) {
+          Text(context.getString(R.string.cancel))
+        }
+      }
+    )
+  }
+
+  @Composable
+  fun RoutingDialog(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val initialPreferences = remember { getRoutingPreferences() }
+    var mode by remember { mutableStateOf(initialPreferences.mode) }
+    var whitelist by remember { mutableStateOf(initialPreferences.whitelist) }
+    var blacklist by remember { mutableStateOf(initialPreferences.blacklist) }
+    var apps by remember { mutableStateOf(listOf<PackageInformation>()) }
+    var loadingApps by remember { mutableStateOf(true) }
+
+    LaunchedEffect(Unit) {
+      loadingApps = true
+      val loadedApps = withContext(Dispatchers.IO) {
+        try {
+          PackageX.package_get_all_network_application(context)
+        } catch (e: Exception) {
+          emptyList()
+        }
+      }
+      apps = loadedApps.sortedBy { (it.applicationName ?: it.packageName ?: "").lowercase() }
+      loadingApps = false
+    }
+
+    AlertDialog(
+      onDismissRequest = onDismiss,
+      title = {
+        Text(
+          text = context.getString(R.string.routing_dialog_title),
+          fontSize = 22.sp
+        )
+      },
+      text = {
+        Column(
+          modifier = Modifier.fillMaxWidth(),
+          verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+          RoutingMode.values().forEach { option ->
+            val labelRes = when (option) {
+              RoutingMode.GLOBAL -> R.string.routing_mode_global
+              RoutingMode.WHITELIST -> R.string.routing_mode_whitelist
+              RoutingMode.BLACKLIST -> R.string.routing_mode_blacklist
+            }
+            Row(
+              modifier = Modifier
+                .fillMaxWidth()
+                .clickable { mode = option },
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              RadioButton(
+                selected = mode == option,
+                onClick = { mode = option }
+              )
+              Text(
+                text = context.getString(labelRes),
+                modifier = Modifier
+                  .padding(start = 8.dp)
+                  .weight(1f)
+              )
+            }
+          }
+
+          when (mode) {
+            RoutingMode.GLOBAL -> {
+              Text(text = context.getString(R.string.routing_mode_global_hint))
+            }
+
+            RoutingMode.WHITELIST, RoutingMode.BLACKLIST -> {
+              val hintRes = if (mode == RoutingMode.WHITELIST) {
+                R.string.routing_app_list_whitelist
+              } else {
+                R.string.routing_app_list_blacklist
+              }
+              Text(
+                text = context.getString(hintRes),
+                fontWeight = FontWeight.Medium
+              )
+              if (loadingApps) {
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.Center
+                ) {
+                  CircularProgressIndicator()
+                }
+              } else if (apps.isEmpty()) {
+                Text(text = context.getString(R.string.routing_empty_apps))
+              } else {
+                LazyColumn(
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 360.dp)
+                ) {
+                  items(apps) { app ->
+                    val packageName = app.packageName ?: return@items
+                    val isChecked = when (mode) {
+                      RoutingMode.WHITELIST -> whitelist.contains(packageName)
+                      RoutingMode.BLACKLIST -> blacklist.contains(packageName)
+                      else -> false
+                    }
+                    Row(
+                      modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                          when (mode) {
+                            RoutingMode.WHITELIST -> {
+                              whitelist = whitelist.toMutableSet().also {
+                                if (!isChecked) {
+                                  it.add(packageName)
+                                } else {
+                                  it.remove(packageName)
+                                }
+                              }
+                            }
+
+                            RoutingMode.BLACKLIST -> {
+                              blacklist = blacklist.toMutableSet().also {
+                                if (!isChecked) {
+                                  it.add(packageName)
+                                } else {
+                                  it.remove(packageName)
+                                }
+                              }
+                            }
+
+                            else -> {}
+                          }
+                        }
+                        .padding(vertical = 8.dp),
+                      verticalAlignment = Alignment.CenterVertically
+                    ) {
+                      Checkbox(
+                        checked = isChecked,
+                        onCheckedChange = { checked ->
+                          when (mode) {
+                            RoutingMode.WHITELIST -> {
+                              whitelist = whitelist.toMutableSet().also {
+                                if (checked) {
+                                  it.add(packageName)
+                                } else {
+                                  it.remove(packageName)
+                                }
+                              }
+                            }
+
+                            RoutingMode.BLACKLIST -> {
+                              blacklist = blacklist.toMutableSet().also {
+                                if (checked) {
+                                  it.add(packageName)
+                                } else {
+                                  it.remove(packageName)
+                                }
+                              }
+                            }
+
+                            else -> {}
+                          }
+                        }
+                      )
+                      Column(modifier = Modifier.padding(start = 8.dp)) {
+                        Text(
+                          text = app.applicationName ?: packageName,
+                          fontSize = 16.sp,
+                          maxLines = 1,
+                          overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                          text = packageName,
+                          fontSize = 12.sp,
+                          color = Color.Gray
+                        )
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            saveRoutingPreferences(
+              RoutingPreferences(
+                mode = mode,
+                whitelist = whitelist,
+                blacklist = blacklist
+              )
+            )
             Toast.makeText(context, context.getString(R.string.toast_saved_success), Toast.LENGTH_SHORT).show()
             onDismiss()
           }
