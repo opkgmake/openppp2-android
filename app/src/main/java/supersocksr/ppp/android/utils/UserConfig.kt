@@ -8,7 +8,7 @@ data class UserConfig(
   val server: Address = Address.unsafeParse("ppp://127.0.0.1:1080"),
   val static_server: Address = Address.unsafeParse("192.168.0.24:20000"),
   val guid: String = "Random",
-  val tun_address: Address? = Address.unsafeParse("10.0.0.214"),
+  val tun_address: Address? = Address.unsafeParse("10.0.0.214")
 ) {
   fun validate() {
     // supplement
