@@ -14,4 +14,6 @@ consumed when building the VPN runtime configuration:
 Both files are read at connect time through `RawReader.readRawResource` in
 `MainActivity` (see the `BypassIpList` and `DNSRuleList` assignments). Keeping the data in
 `res/raw` allows Android's resource system to package the lists efficiently while making
-runtime access straightforward.
+runtime access straightforward. Even when the "proxy all traffic" preference is enabled we
+continue to load the domain rules so the embedded resolver keeps using the curated rule
+set instead of falling back to slower upstream discovery.

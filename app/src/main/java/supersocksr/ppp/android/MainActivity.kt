@@ -122,6 +122,9 @@ class MainActivity : PppVpnActivity() {
     val encryptionPreferences = settings.getEncryptionPreferences()
     val serverProxy = settings.getServerProxy()
     val routingPreferences = settings.getRoutingPreferences()
+    val bypassIpRules = rawReader.readRawResource(R.raw.ip)
+    val dnsRules = rawReader.readRawResource(R.raw.domain)
+
     val config = VPNLinkConfiguration().apply {
       SubnetAddress = "255.255.255.0"
       IPAddress = selectedUserConfig.value!!.tun_address.toString()
@@ -141,11 +144,12 @@ class MainActivity : PppVpnActivity() {
 
       if (routingPreferences.fullTunnel) {
         BypassIpList = ""
-        DNSRuleList = ""
       } else {
-        BypassIpList = rawReader.readRawResource(R.raw.ip)
-        DNSRuleList = rawReader.readRawResource(R.raw.domain)
+        BypassIpList = bypassIpRules
       }
+      // Keep feeding the curated DNS rules even in full-tunnel mode so lookups do not
+      // fall back to high-latency upstream discovery.
+      DNSRuleList = dnsRules
       AllowedApplicationPackageNames.clear()
       DisallowedApplicationPackageNames.clear()
       when (routingPreferences.mode) {
