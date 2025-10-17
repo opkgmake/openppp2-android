@@ -138,8 +138,19 @@ class MainActivity : PppVpnActivity() {
       FlashMode = false
       AtomicHttpProxySet = false
       DnsAddresses.apply {
-        add("8.8.8.8")
-        add("8.8.4.4")
+        clear()
+        val primaryDns = selectedUserConfig.value!!.dns1.trim()
+        val secondaryDns = selectedUserConfig.value!!.dns2.trim()
+        if (primaryDns.isNotEmpty()) {
+          add(primaryDns)
+        }
+        if (secondaryDns.isNotEmpty()) {
+          add(secondaryDns)
+        }
+        if (isEmpty()) {
+          add("8.8.8.8")
+          add("8.8.4.4")
+        }
       }
 
       if (routingPreferences.fullTunnel) {
@@ -557,6 +568,8 @@ class MainActivity : PppVpnActivity() {
         )
       )
     }
+    var dns1 by remember { mutableStateOf(TextFieldValue(config.dns1)) }
+    var dns2 by remember { mutableStateOf(TextFieldValue(config.dns2)) }
 
     val lazyListState = rememberLazyListState()
     val dialogKeyboardActions = KeyboardActions(onDone = {
@@ -636,6 +649,26 @@ class MainActivity : PppVpnActivity() {
               keyboardActions = dialogKeyboardActions
             )
           }
+          item {
+            OutlinedTextField(
+              modifier = dialogTextFieldModifier,
+              value = dns1,
+              onValueChange = { dns1 = it },
+              label = { Text(getString(R.string.config_dns_primary)) },
+              keyboardOptions = dialogKeyboardOptions,
+              keyboardActions = dialogKeyboardActions
+            )
+          }
+          item {
+            OutlinedTextField(
+              modifier = dialogTextFieldModifier,
+              value = dns2,
+              onValueChange = { dns2 = it },
+              label = { Text(getString(R.string.config_dns_secondary)) },
+              keyboardOptions = dialogKeyboardOptions,
+              keyboardActions = dialogKeyboardActions
+            )
+          }
         }
       },
       confirmButton = {
@@ -650,6 +683,8 @@ class MainActivity : PppVpnActivity() {
                 guid = guid.text.trim(),
                 tun_address = tun_address.text.trim()
                   .let { if (it.isBlank()) null else Address.parse(it) },
+                dns1 = dns1.text.trim(),
+                dns2 = dns2.text.trim(),
               )
               cfg.validate()
               onSave(cfg)

@@ -17,6 +17,8 @@
     <string name="config_guid">GUID</string>
     <string name="config_static">静态服务器地址</string>
     <string name="config_tun">虚拟网卡地址</string>
+    <string name="config_dns_primary">主 DNS</string>
+    <string name="config_dns_secondary">备用 DNS</string>
     <string name="warn_deserialize">配置解析失败，已清空全部配置。</string>
     <string name="warn_config_not_select">请先选择一个配置。</string>
 
