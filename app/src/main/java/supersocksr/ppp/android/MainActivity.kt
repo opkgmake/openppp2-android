@@ -547,16 +547,17 @@ class MainActivity : PppVpnActivity() {
         }
       }
 
-      Row(
-        modifier = Modifier
-          .fillMaxWidth()
-          .padding(8.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly
-      ) {
-        val testLabel = stringResource(R.string.vpn_test)
-        val testingLabel = stringResource(R.string.vpn_testing)
-        val testText = remember { mutableStateOf(testLabel) }
-        var startText by remember { mutableStateOf(stringResource(R.string.vpn_start)) }
+        Row(
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(8.dp),
+          horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+          val testLabel = stringResource(R.string.vpn_test)
+          val testingLabel = stringResource(R.string.vpn_testing)
+          val testText = remember { mutableStateOf(testLabel) }
+          val startLabel = stringResource(R.string.vpn_start)
+          var startText by remember { mutableStateOf(startLabel) }
 
         Button(
           onClick = {
@@ -593,7 +594,7 @@ class MainActivity : PppVpnActivity() {
         Button(
           onClick = {
             onStopVpn()
-            startText = stringResource(R.string.vpn_start)
+            startText = startLabel
           }
         ) {
           Text(stringResource(R.string.vpn_stop))
