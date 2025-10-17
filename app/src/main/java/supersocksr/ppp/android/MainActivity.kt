@@ -103,10 +103,8 @@ class MainActivity : PppVpnActivity() {
   private lateinit var settings: Settings
   private val selectedUserConfig: MutableState<UserConfig?> = mutableStateOf(null)
   private val dnsAddressPattern = Regex("/(\\d{1,3}(?:\\.\\d{1,3}){3})/")
-  private val dnsRuleRewritePattern = Regex("/(\\d{1,3}(?:\\.\\d{1,3}){3})(/[^\\s]+)")
   private val defaultPrimaryDns = "8.8.8.8"
   private val defaultSecondaryDns = "8.8.4.4"
-  private val dnsRuleRewriteCache = mutableMapOf<String, String>()
   private var cachedBypassIpRules: String? = null
   private var cachedDnsRules: String? = null
 
@@ -136,6 +134,8 @@ class MainActivity : PppVpnActivity() {
       .readRawResource(R.raw.domain)
       .also { cachedDnsRules = it }
     var effectiveDnsRules = rawDnsRules
+    val userRemoteDnsServers = linkedSetOf<String>()
+    var usedRuleDerivedServers = false
 
     val config = VPNLinkConfiguration().apply {
       SubnetAddress = "255.255.255.0"
@@ -160,12 +160,22 @@ class MainActivity : PppVpnActivity() {
           routingPreferences.forceRemoteDns && secondaryDns == defaultSecondaryDns
         if (primaryDns.isNotEmpty() && !shouldIgnorePrimaryDefault) {
           dnsServers.add(primaryDns)
+          if (routingPreferences.forceRemoteDns && primaryDns != defaultPrimaryDns) {
+            userRemoteDnsServers.add(primaryDns)
+          }
         }
         if (secondaryDns.isNotEmpty() && !shouldIgnoreSecondaryDefault) {
           dnsServers.add(secondaryDns)
+          if (routingPreferences.forceRemoteDns && secondaryDns != defaultSecondaryDns) {
+            userRemoteDnsServers.add(secondaryDns)
+          }
         }
         if (routingPreferences.forceRemoteDns && dnsServers.isEmpty()) {
-          dnsServers.addAll(extractDnsServersFromRules(rawDnsRules))
+          val fallbackServers = extractDnsServersFromRules(rawDnsRules)
+          if (fallbackServers.isNotEmpty()) {
+            usedRuleDerivedServers = true
+            dnsServers.addAll(fallbackServers)
+          }
         }
         if (dnsServers.isEmpty()) {
           if (routingPreferences.forceRemoteDns) {
@@ -174,16 +184,14 @@ class MainActivity : PppVpnActivity() {
           dnsServers.add(defaultPrimaryDns)
           dnsServers.add(defaultSecondaryDns)
         }
-        if (routingPreferences.forceRemoteDns) {
-          val remoteDnsTargets = dnsServers
-            .filter { it != defaultPrimaryDns && it != defaultSecondaryDns }
-            .takeIf { it.isNotEmpty() }
-          if (remoteDnsTargets != null) {
-            Log.d(TAG, "forceRemoteDns rewriting domain rules for $remoteDnsTargets")
-            effectiveDnsRules = getOrRewriteDnsRules(rawDnsRules, remoteDnsTargets)
-          }
-        }
         dnsServers.forEach { add(it) }
+      }
+
+      if (routingPreferences.forceRemoteDns && userRemoteDnsServers.isNotEmpty()) {
+        Log.d(TAG, "forceRemoteDns using user-defined servers $userRemoteDnsServers; clearing bundled DNS rules")
+        effectiveDnsRules = ""
+      } else if (routingPreferences.forceRemoteDns && usedRuleDerivedServers) {
+        Log.i(TAG, "forceRemoteDns relying on bundled DNS rules for resolver selection")
       }
 
       if (routingPreferences.fullTunnel) {
@@ -319,35 +327,6 @@ class MainActivity : PppVpnActivity() {
       }
     }
     return servers.toList()
-  }
-
-  private fun getOrRewriteDnsRules(
-    originalRules: String,
-    remoteServers: List<String>,
-  ): String {
-    val cacheKey = remoteServers.joinToString(separator = ",")
-    dnsRuleRewriteCache[cacheKey]?.let { return it }
-    val rewritten = try {
-      rewriteDnsRulesForRemoteDns(originalRules, remoteServers)
-    } catch (throwable: Throwable) {
-      Log.e(TAG, "failed to rewrite DNS rules for $remoteServers", throwable)
-      originalRules
-    }
-    dnsRuleRewriteCache[cacheKey] = rewritten
-    return rewritten
-  }
-
-  private fun rewriteDnsRulesForRemoteDns(rules: String, remoteServers: List<String>): String {
-    if (rules.isEmpty() || remoteServers.isEmpty()) {
-      return rules
-    }
-    var index = 0
-    return dnsRuleRewritePattern.replace(rules) { matchResult ->
-      val suffix = matchResult.groupValues.getOrNull(2).orEmpty()
-      val replacement = remoteServers.getOrElse(index % remoteServers.size) { remoteServers.last() }
-      index += 1
-      "/$replacement$suffix"
-    }
   }
 
   // FIXME: this function actually cannot hide ime.
