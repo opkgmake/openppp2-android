@@ -9,6 +9,8 @@ data class UserConfig(
   val static_server: Address = Address.unsafeParse("192.168.0.24:20000"),
   val guid: String = "Random",
   val tun_address: Address? = Address.unsafeParse("10.0.0.214"),
+  val dns1: String = "8.8.8.8",
+  val dns2: String = "8.8.4.4",
 ) {
   fun validate() {
     // supplement

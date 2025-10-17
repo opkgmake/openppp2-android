@@ -60,6 +60,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.lifecycleScope
@@ -101,6 +102,10 @@ class MainActivity : PppVpnActivity() {
   private lateinit var settingsPreferences: SharedPreferences
   private lateinit var settings: Settings
   private val selectedUserConfig: MutableState<UserConfig?> = mutableStateOf(null)
+  private val dnsAddressPattern = Regex("/(\\d{1,3}(?:\\.\\d{1,3}){3})/")
+  private val dnsRuleRewritePattern = Regex("/(\\d{1,3}(?:\\.\\d{1,3}){3})(/[^\\s]+)")
+  private val defaultPrimaryDns = "8.8.8.8"
+  private val defaultSecondaryDns = "8.8.4.4"
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
@@ -118,6 +123,13 @@ class MainActivity : PppVpnActivity() {
     }
     Log.i(TAG, "running using config: ${selectedUserConfig.value!!}")
     val rawReader = RawReader(resources)
+    val encryptionPreferences = settings.getEncryptionPreferences()
+    val serverProxy = settings.getServerProxy()
+    val routingPreferences = settings.getRoutingPreferences()
+    val bypassIpRules = rawReader.readRawResource(R.raw.ip)
+    val rawDnsRules = rawReader.readRawResource(R.raw.domain)
+    var effectiveDnsRules = rawDnsRules
+
     val config = VPNLinkConfiguration().apply {
       SubnetAddress = "255.255.255.0"
       IPAddress = selectedUserConfig.value!!.tun_address.toString()
@@ -131,25 +143,80 @@ class MainActivity : PppVpnActivity() {
       FlashMode = false
       AtomicHttpProxySet = false
       DnsAddresses.apply {
-        add("8.8.8.8")
-        add("8.8.4.4")
+        clear()
+        val primaryDns = selectedUserConfig.value!!.dns1.trim()
+        val secondaryDns = selectedUserConfig.value!!.dns2.trim()
+        val dnsServers = linkedSetOf<String>()
+        val shouldIgnorePrimaryDefault =
+          routingPreferences.forceRemoteDns && primaryDns == defaultPrimaryDns
+        val shouldIgnoreSecondaryDefault =
+          routingPreferences.forceRemoteDns && secondaryDns == defaultSecondaryDns
+        if (primaryDns.isNotEmpty() && !shouldIgnorePrimaryDefault) {
+          dnsServers.add(primaryDns)
+        }
+        if (secondaryDns.isNotEmpty() && !shouldIgnoreSecondaryDefault) {
+          dnsServers.add(secondaryDns)
+        }
+        if (routingPreferences.forceRemoteDns && dnsServers.isEmpty()) {
+          dnsServers.addAll(extractDnsServersFromRules(rawDnsRules))
+        }
+        if (dnsServers.isEmpty()) {
+          if (routingPreferences.forceRemoteDns) {
+            Log.w(TAG, "forceRemoteDns enabled but no remote servers discovered; using legacy defaults")
+          }
+          dnsServers.add(defaultPrimaryDns)
+          dnsServers.add(defaultSecondaryDns)
+        }
+        if (routingPreferences.forceRemoteDns) {
+          val remoteDnsTargets = dnsServers
+            .filter { it != defaultPrimaryDns && it != defaultSecondaryDns }
+            .takeIf { it.isNotEmpty() }
+          if (remoteDnsTargets != null) {
+            Log.d(TAG, "forceRemoteDns rewriting domain rules for $remoteDnsTargets")
+            effectiveDnsRules = rewriteDnsRulesForRemoteDns(rawDnsRules, remoteDnsTargets)
+          }
+        }
+        dnsServers.forEach { add(it) }
       }
 
-      BypassIpList = rawReader.readRawResource(R.raw.ip)
-      DNSRuleList = rawReader.readRawResource(R.raw.domain)
-      AllowedApplicationPackageNames.add(packageName)
-      DisallowedApplicationPackageNames.add(packageName)
+      if (routingPreferences.fullTunnel) {
+        BypassIpList = ""
+      } else {
+        BypassIpList = bypassIpRules
+      }
+      // Keep feeding the curated DNS rules even in full-tunnel mode so lookups do not
+      // fall back to high-latency upstream discovery.
+      DNSRuleList = effectiveDnsRules
+      AllowedApplicationPackageNames.clear()
+      DisallowedApplicationPackageNames.clear()
+      when (routingPreferences.mode) {
+        RoutingMode.GLOBAL -> {
+          // No explicit package routing; all apps use VPN by default.
+        }
+
+        RoutingMode.WHITELIST -> {
+          routingPreferences.whitelist
+            .filter { it.isNotBlank() }
+            .forEach { AllowedApplicationPackageNames.add(it) }
+        }
+
+        RoutingMode.BLACKLIST -> {
+          routingPreferences.blacklist
+            .filter { it.isNotBlank() }
+            .forEach { DisallowedApplicationPackageNames.add(it) }
+        }
+      }
 
       VPNConfiguration.apply {
         key.apply {
-          kf = 154543927
-          kx = 128
-          kl = 10
-          kh = 12
-          protocol = "aes-128-cfb"
-          protocol_key = "N6HMzdUs7IUnYHwq"
-          transport = "aes-256-cfb"
-          transport_key = "HWFweXu2g5RVMEpy"
+          kf = encryptionPreferences.kf
+          kx = encryptionPreferences.kx
+          kl = encryptionPreferences.kl
+          kh = encryptionPreferences.kh
+          protocol = encryptionPreferences.protocol
+          protocol_key = encryptionPreferences.protocolKey
+          transport = encryptionPreferences.transport
+          transport_key = encryptionPreferences.transportKey
           masked = false
           plaintext = false
           delta_encode = false
@@ -210,6 +277,7 @@ class MainActivity : PppVpnActivity() {
           Log.d(TAG, "client guid: $guid")
           server = VPN.vpn_link_of(selectedUserConfig.value!!.server.toString())!!.url
           Log.d(TAG, "client server: $server")
+          server_proxy = serverProxy
           bandwidth = 0
           reconnections.timeout = Macro.PPP_TCP_CONNECT_TIMEOUT
 
@@ -227,6 +295,36 @@ class MainActivity : PppVpnActivity() {
 
     }
     return config
+  }
+
+  private fun extractDnsServersFromRules(rules: String, maxCount: Int = 2): List<String> {
+    if (rules.isEmpty()) {
+      return emptyList()
+    }
+    val servers = linkedSetOf<String>()
+    dnsAddressPattern.findAll(rules).forEach { matchResult ->
+      val candidate = matchResult.groupValues.getOrNull(1)?.trim().orEmpty()
+      if (candidate.isNotEmpty()) {
+        servers.add(candidate)
+        if (servers.size >= maxCount) {
+          return servers.toList()
+        }
+      }
+    }
+    return servers.toList()
+  }
+
+  private fun rewriteDnsRulesForRemoteDns(rules: String, remoteServers: List<String>): String {
+    if (rules.isEmpty() || remoteServers.isEmpty()) {
+      return rules
+    }
+    var index = 0
+    return dnsRuleRewritePattern.replace(rules) { matchResult ->
+      val suffix = matchResult.groupValues.getOrNull(2).orEmpty()
+      val replacement = remoteServers.getOrElse(index % remoteServers.size) { remoteServers.last() }
+      index += 1
+      "/$replacement$suffix"
+    }
   }
 
   // FIXME: this function actually cannot hide ime.
@@ -260,8 +358,8 @@ class MainActivity : PppVpnActivity() {
         startDestination = "home",
         Modifier.padding(innerPadding)
       ) {
-        composable("Home") { ConfigSelectionScreen(navController) }
-        composable("Settings") { settings.SettingsScreen() }
+        composable("home") { ConfigSelectionScreen(navController) }
+        composable("settings") { settings.SettingsScreen() }
       }
     }
   }
@@ -269,11 +367,11 @@ class MainActivity : PppVpnActivity() {
   // 底部导航栏
   @Composable
   fun BottomNavigationBar(navController: NavHostController, selectedTab: MutableState<Int>) {
-    data class NavItem(val label: String, val icon: ImageVector)
+    data class NavItem(val route: String, val label: String, val icon: ImageVector)
 
     val items = listOf(
-      NavItem(getString(R.string.nav_home), Icons.Default.Home),
-      NavItem(getString(R.string.nav_settings), Icons.Default.Settings),
+      NavItem("home", getString(R.string.nav_home), Icons.Default.Home),
+      NavItem("settings", getString(R.string.nav_settings), Icons.Default.Settings),
     )
 
     NavigationBar(
@@ -293,7 +391,11 @@ class MainActivity : PppVpnActivity() {
           selected = isSelected,
           onClick = {
             selectedTab.value = index
-            navController.navigate(item.label)
+            navController.navigate(item.route) {
+              popUpTo(navController.graph.startDestinationId) { saveState = true }
+              launchSingleTop = true
+              restoreState = true
+            }
           },
           colors = NavigationBarItemDefaults.colors(
             selectedIconColor = Color.White,
@@ -426,7 +528,9 @@ class MainActivity : PppVpnActivity() {
           .padding(8.dp),
         horizontalArrangement = Arrangement.SpaceEvenly
       ) {
-        val testText = remember { mutableStateOf("Test") }
+        val testLabel = getString(R.string.vpn_test)
+        val testingLabel = getString(R.string.vpn_testing)
+        val testText = remember { mutableStateOf(testLabel) }
         var startText by remember { mutableStateOf(getString(R.string.vpn_start)) }
 
         // 开始按钮
@@ -443,7 +547,7 @@ class MainActivity : PppVpnActivity() {
             }
             vpn_run()
             vpnRunning = true
-            testText.value = "Test"
+            testText.value = testLabel
             selectedUserConfig.value?.name?.let { startText = it }
           },
           enabled = vpnRunning.not()
@@ -452,10 +556,10 @@ class MainActivity : PppVpnActivity() {
         }
         if (vpnRunning) {
           Button(onClick = {
-            if (testText.value != "Testing...") {
+            if (testText.value != testingLabel) {
               testConnection(testText)
             }
-            testText.value = "Testing..."
+            testText.value = testingLabel
           }) {
             Text(testText.value)
           }
@@ -520,6 +624,8 @@ class MainActivity : PppVpnActivity() {
         )
       )
     }
+    var dns1 by remember { mutableStateOf(TextFieldValue(config.dns1)) }
+    var dns2 by remember { mutableStateOf(TextFieldValue(config.dns2)) }
 
     val lazyListState = rememberLazyListState()
     val dialogKeyboardActions = KeyboardActions(onDone = {
@@ -574,7 +680,7 @@ class MainActivity : PppVpnActivity() {
               readOnly = true,
               onValueChange = { guid = it },
               label = { Text(getString(R.string.config_guid)) },
-              placeholder = { Text("Random") },
+              placeholder = { Text(getString(R.string.placeholder_random)) },
               keyboardOptions = dialogKeyboardOptions,
               keyboardActions = dialogKeyboardActions
             )
@@ -599,6 +705,26 @@ class MainActivity : PppVpnActivity() {
               keyboardActions = dialogKeyboardActions
             )
           }
+          item {
+            OutlinedTextField(
+              modifier = dialogTextFieldModifier,
+              value = dns1,
+              onValueChange = { dns1 = it },
+              label = { Text(getString(R.string.config_dns_primary)) },
+              keyboardOptions = dialogKeyboardOptions,
+              keyboardActions = dialogKeyboardActions
+            )
+          }
+          item {
+            OutlinedTextField(
+              modifier = dialogTextFieldModifier,
+              value = dns2,
+              onValueChange = { dns2 = it },
+              label = { Text(getString(R.string.config_dns_secondary)) },
+              keyboardOptions = dialogKeyboardOptions,
+              keyboardActions = dialogKeyboardActions
+            )
+          }
         }
       },
       confirmButton = {
@@ -613,6 +739,8 @@ class MainActivity : PppVpnActivity() {
                 guid = guid.text.trim(),
                 tun_address = tun_address.text.trim()
                   .let { if (it.isBlank()) null else Address.parse(it) },
+                dns1 = dns1.text.trim(),
+                dns2 = dns2.text.trim(),
               )
               cfg.validate()
               onSave(cfg)
@@ -620,7 +748,7 @@ class MainActivity : PppVpnActivity() {
               e.printStackTrace()
               Toast.makeText(
                 this,
-                "Invalid supersocksr.ppp.android.utils.Address: ${e.message}",
+                getString(R.string.toast_invalid_address, e.message ?: ""),
                 Toast.LENGTH_LONG
               )
                 .show()
@@ -661,37 +789,47 @@ class MainActivity : PppVpnActivity() {
       Log.d(TAG, "beginTime: $beginTime")
       try {
         client.newCall(request).execute().use { response ->
-          val result = if (response.isSuccessful) {
-            (System.currentTimeMillis() - beginTime).toString() + "ms"
+          if (response.isSuccessful) {
+            val duration = System.currentTimeMillis() - beginTime
+            withContext(Dispatchers.Main) {
+              state.value = getString(R.string.test_result_latency, duration)
+            }
           } else {
-            "-1 ms"
-          }
-          withContext(Dispatchers.Main) {
-            state.value = result
+            withContext(Dispatchers.Main) {
+              state.value = getString(R.string.test_result_http_error)
+            }
           }
         }
       } catch (e: Exception) {
         Log.e(TAG, "${e.cause}: ${e.message}")
         val tx = when (e.cause) {
           is ConnectException -> {
-            "No Connection"
+            getString(R.string.test_result_no_connection)
           }
 
           is UnknownHostException -> {
-            "Unknown Host"
+            getString(R.string.test_result_unknown_host)
           }
 
           is SocketTimeoutException -> {
-            "Timeout"
+            getString(R.string.test_result_timeout)
           }
 
           else -> {
-            "Error"
+            getString(R.string.test_result_error)
           }
         }
         withContext(Dispatchers.Main) {
           state.value = tx
-          Toast.makeText(this@MainActivity, "${e.cause}: ${e.message}", Toast.LENGTH_LONG).show()
+          Toast.makeText(
+            this@MainActivity,
+            getString(
+              R.string.toast_error_message,
+              e.cause?.toString() ?: getString(R.string.test_result_error),
+              e.message ?: ""
+            ),
+            Toast.LENGTH_LONG
+          ).show()
         }
       }
     }
@@ -704,7 +842,7 @@ fun DeleteButton(modifier: Modifier = Modifier, onClick: () -> Unit) {
   IconButton(onClick = onClick) {
     Icon(
       imageVector = Icons.Filled.Delete, // 使用 Material Design 的删除图标
-      contentDescription = "Delete",
+      contentDescription = stringResource(id = R.string.delete_content_description),
       tint = MaterialTheme.colorScheme.primary // 设置图标颜色
     )
   }

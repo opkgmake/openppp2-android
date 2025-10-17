@@ -1,0 +1,78 @@
+<resources>
+    <string name="app_name">openppp2</string>
+    <string name="vpn_start">Start</string>
+    <string name="vpn_stop">Stop</string>
+    <string name="save">Save</string>
+    <string name="cancel">Cancel</string>
+    <string name="nav_home">Home</string>
+    <string name="nav_settings">Settings</string>
+    <string name="test_options">Test Options</string>
+    <string name="show_logs">Show Logs</string>
+    <string name="test_options_subtitle">Test link and timeout</string>
+    <string name="test_link">Test Link</string>
+    <string name="test_timeout">Timeout (ms)</string>
+    <string name="config_title">Edit Configuration</string>
+    <string name="config_name">Config Name</string>
+    <string name="config_server">Server Address</string>
+    <string name="config_guid">GUID</string>
+    <string name="config_static">Static Server Address</string>
+    <string name="config_tun">Tun Address</string>
+    <string name="config_dns_primary">Primary DNS</string>
+    <string name="config_dns_secondary">Secondary DNS</string>
+    <string name="warn_deserialize">Deserialization failed, clear all configs.</string>
+    <string name="warn_config_not_select">Please select a config first.</string>
+
+    <string name="settings_group_vpn">VPN Parameters</string>
+    <string name="settings_group_other">Other Settings</string>
+    <string name="encryption_settings">Encryption Settings</string>
+    <string name="encryption_settings_subtitle">Modify keys and algorithm options</string>
+    <string name="encryption_dialog_title">Encryption Settings</string>
+    <string name="encryption_kf">KF (hex or decimal)</string>
+    <string name="encryption_kx">KX (hex or decimal)</string>
+    <string name="encryption_kl">KL (hex or decimal)</string>
+    <string name="encryption_kh">KH (hex or decimal)</string>
+    <string name="encryption_protocol">Protocol Algorithm</string>
+    <string name="encryption_protocol_key">Protocol Key</string>
+    <string name="encryption_transport">Transport Algorithm</string>
+    <string name="encryption_transport_key">Transport Key</string>
+    <string name="toast_encryption_empty">Please fill in all values.</string>
+    <string name="toast_encryption_invalid_number">Enter a valid hexadecimal or decimal number.</string>
+    <string name="toast_saved_success">Saved.</string>
+
+    <string name="server_proxy_settings">Server Proxy</string>
+    <string name="server_proxy_settings_subtitle">Configure the server_proxy field</string>
+    <string name="server_proxy_dialog_title">Server Proxy</string>
+    <string name="server_proxy_label">Proxy Address</string>
+    <string name="server_proxy_placeholder">e.g. http://127.0.0.1:8080</string>
+
+    <string name="routing_settings">Routing Mode</string>
+    <string name="routing_settings_subtitle">Choose global or per-app routing</string>
+    <string name="routing_dialog_title">Routing</string>
+    <string name="routing_mode_global">Global proxy (all apps use VPN)</string>
+    <string name="routing_mode_global_hint">Global routing honors the bundled bypass list. Enable "Proxy all traffic" to send every request through the VPN.</string>
+    <string name="routing_mode_whitelist">Whitelist (only selected apps use VPN)</string>
+    <string name="routing_mode_blacklist">Blacklist (selected apps bypass VPN)</string>
+    <string name="routing_app_list_whitelist">Select the apps that should use the VPN:</string>
+    <string name="routing_app_list_blacklist">Select the apps that should bypass the VPN:</string>
+    <string name="routing_loading_apps">Loading installed apps…</string>
+    <string name="routing_empty_apps">No eligible apps found.</string>
+    <string name="routing_full_tunnel_label">Proxy all traffic</string>
+    <string name="routing_full_tunnel_description">Ignore the built-in direct IP and domain lists so every request stays in the VPN tunnel.</string>
+    <string name="routing_full_tunnel_hint_enabled">All-traffic proxy is enabled. Built-in bypass lists will be ignored.</string>
+    <string name="routing_force_remote_dns_label">Force remote DNS</string>
+    <string name="routing_force_remote_dns_description">Skip the default system resolvers and prefer the configured or rule-based servers to avoid leaking to 8.8.8.8.</string>
+
+    <string name="vpn_test">Test</string>
+    <string name="vpn_testing">Testing...</string>
+    <string name="test_result_latency">%1$d ms</string>
+    <string name="test_result_http_error">HTTP Error</string>
+    <string name="test_result_no_connection">No Connection</string>
+    <string name="test_result_unknown_host">Unknown Host</string>
+    <string name="test_result_timeout">Timeout</string>
+    <string name="test_result_error">Error</string>
+
+    <string name="placeholder_random">Random</string>
+    <string name="toast_invalid_address">Invalid supersocksr.ppp.android.utils.Address: %1$s</string>
+    <string name="toast_error_message">%1$s: %2$s</string>
+    <string name="delete_content_description">Delete</string>
+</resources>
