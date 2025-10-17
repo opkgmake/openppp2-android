@@ -76,6 +76,7 @@ const val SERVER_PROXY_KEY = "server_proxy"
 const val ROUTING_MODE_KEY = "routing_mode"
 const val ROUTING_ALLOWED_PACKAGES_KEY = "routing_allowed_packages"
 const val ROUTING_DISALLOWED_PACKAGES_KEY = "routing_disallowed_packages"
+const val ROUTING_FULL_TUNNEL_KEY = "routing_full_tunnel"
 
 const val DEFAULT_ENCRYPTION_KF = 0x09362737
 const val DEFAULT_ENCRYPTION_KX = 128
@@ -104,6 +105,7 @@ data class RoutingPreferences(
   val mode: RoutingMode = RoutingMode.GLOBAL,
   val whitelist: Set<String> = emptySet(),
   val blacklist: Set<String> = emptySet(),
+  val fullTunnel: Boolean = false,
 )
 
 data class EncryptionPreferences(
@@ -250,7 +252,17 @@ class Settings(val context: Context, private val preferences: SharedPreferences)
     val mode = RoutingMode.fromStorage(preferences.getString(ROUTING_MODE_KEY, DEFAULT_ROUTING_MODE))
     val whitelist = preferences.getStringSet(ROUTING_ALLOWED_PACKAGES_KEY, emptySet())?.toSet() ?: emptySet()
     val blacklist = preferences.getStringSet(ROUTING_DISALLOWED_PACKAGES_KEY, emptySet())?.toSet() ?: emptySet()
-    return RoutingPreferences(mode = mode, whitelist = whitelist, blacklist = blacklist)
+    val fullTunnel = if (mode == RoutingMode.GLOBAL) {
+      preferences.getBoolean(ROUTING_FULL_TUNNEL_KEY, false)
+    } else {
+      false
+    }
+    return RoutingPreferences(
+      mode = mode,
+      whitelist = whitelist,
+      blacklist = blacklist,
+      fullTunnel = fullTunnel
+    )
   }
 
   fun saveRoutingPreferences(routingPreferences: RoutingPreferences) {
@@ -258,6 +270,10 @@ class Settings(val context: Context, private val preferences: SharedPreferences)
       .putString(ROUTING_MODE_KEY, routingPreferences.mode.storageValue)
       .putStringSet(ROUTING_ALLOWED_PACKAGES_KEY, routingPreferences.whitelist.toSet())
       .putStringSet(ROUTING_DISALLOWED_PACKAGES_KEY, routingPreferences.blacklist.toSet())
+      .putBoolean(
+        ROUTING_FULL_TUNNEL_KEY,
+        if (routingPreferences.mode == RoutingMode.GLOBAL) routingPreferences.fullTunnel else false
+      )
       .apply()
   }
 
@@ -512,6 +528,7 @@ class Settings(val context: Context, private val preferences: SharedPreferences)
     var blacklist by remember { mutableStateOf(initialPreferences.blacklist) }
     var apps by remember { mutableStateOf(listOf<PackageInformation>()) }
     var loadingApps by remember { mutableStateOf(true) }
+    var fullTunnel by remember { mutableStateOf(initialPreferences.fullTunnel) }
 
     LaunchedEffect(Unit) {
       loadingApps = true
@@ -544,12 +561,22 @@ class Settings(val context: Context, private val preferences: SharedPreferences)
             Row(
               modifier = Modifier
                 .fillMaxWidth()
-                .clickable { mode = option },
+                .clickable {
+                  mode = option
+                  if (option != RoutingMode.GLOBAL) {
+                    fullTunnel = false
+                  }
+                },
               verticalAlignment = Alignment.CenterVertically
             ) {
               RadioButton(
                 selected = mode == option,
-                onClick = { mode = option }
+                onClick = {
+                  mode = option
+                  if (option != RoutingMode.GLOBAL) {
+                    fullTunnel = false
+                  }
+                }
               )
               Text(
                 text = context.getString(labelRes),
@@ -562,7 +589,31 @@ class Settings(val context: Context, private val preferences: SharedPreferences)
 
           when (mode) {
             RoutingMode.GLOBAL -> {
-              Text(text = context.getString(R.string.routing_mode_global_hint))
+              Row(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .clickable { fullTunnel = !fullTunnel },
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Checkbox(
+                  checked = fullTunnel,
+                  onCheckedChange = { checked -> fullTunnel = checked }
+                )
+                Column(modifier = Modifier.padding(start = 8.dp)) {
+                  Text(text = context.getString(R.string.routing_full_tunnel_label))
+                  Text(
+                    text = context.getString(R.string.routing_full_tunnel_description),
+                    fontSize = 12.sp,
+                    color = Color.Gray
+                  )
+                }
+              }
+              val hintRes = if (fullTunnel) {
+                R.string.routing_full_tunnel_hint_enabled
+              } else {
+                R.string.routing_mode_global_hint
+              }
+              Text(text = context.getString(hintRes))
             }
 
             RoutingMode.WHITELIST, RoutingMode.BLACKLIST -> {
@@ -684,7 +735,8 @@ class Settings(val context: Context, private val preferences: SharedPreferences)
               RoutingPreferences(
                 mode = mode,
                 whitelist = whitelist,
-                blacklist = blacklist
+                blacklist = blacklist,
+                fullTunnel = if (mode == RoutingMode.GLOBAL) fullTunnel else false
               )
             )
             Toast.makeText(context, context.getString(R.string.toast_saved_success), Toast.LENGTH_SHORT).show()

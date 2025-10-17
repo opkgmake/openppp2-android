@@ -139,8 +139,13 @@ class MainActivity : PppVpnActivity() {
         add("8.8.4.4")
       }
 
-      BypassIpList = rawReader.readRawResource(R.raw.ip)
-      DNSRuleList = rawReader.readRawResource(R.raw.domain)
+      if (routingPreferences.fullTunnel) {
+        BypassIpList = ""
+        DNSRuleList = ""
+      } else {
+        BypassIpList = rawReader.readRawResource(R.raw.ip)
+        DNSRuleList = rawReader.readRawResource(R.raw.domain)
+      }
       AllowedApplicationPackageNames.clear()
       DisallowedApplicationPackageNames.clear()
       when (routingPreferences.mode) {
