@@ -264,8 +264,8 @@ class MainActivity : PppVpnActivity() {
         startDestination = "home",
         Modifier.padding(innerPadding)
       ) {
-        composable("Home") { ConfigSelectionScreen(navController) }
-        composable("Settings") { settings.SettingsScreen() }
+        composable("home") { ConfigSelectionScreen(navController) }
+        composable("settings") { settings.SettingsScreen() }
       }
     }
   }
@@ -273,11 +273,11 @@ class MainActivity : PppVpnActivity() {
   // 底部导航栏
   @Composable
   fun BottomNavigationBar(navController: NavHostController, selectedTab: MutableState<Int>) {
-    data class NavItem(val label: String, val icon: ImageVector)
+    data class NavItem(val route: String, val label: String, val icon: ImageVector)
 
     val items = listOf(
-      NavItem(getString(R.string.nav_home), Icons.Default.Home),
-      NavItem(getString(R.string.nav_settings), Icons.Default.Settings),
+      NavItem("home", getString(R.string.nav_home), Icons.Default.Home),
+      NavItem("settings", getString(R.string.nav_settings), Icons.Default.Settings),
     )
 
     NavigationBar(
@@ -297,7 +297,11 @@ class MainActivity : PppVpnActivity() {
           selected = isSelected,
           onClick = {
             selectedTab.value = index
-            navController.navigate(item.label)
+            navController.navigate(item.route) {
+              popUpTo(navController.graph.startDestinationId) { saveState = true }
+              launchSingleTop = true
+              restoreState = true
+            }
           },
           colors = NavigationBarItemDefaults.colors(
             selectedIconColor = Color.White,
