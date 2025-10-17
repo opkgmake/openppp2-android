@@ -103,6 +103,8 @@ class MainActivity : PppVpnActivity() {
   private lateinit var settings: Settings
   private val selectedUserConfig: MutableState<UserConfig?> = mutableStateOf(null)
   private val dnsAddressPattern = Regex("/(\\d{1,3}(?:\\.\\d{1,3}){3})/")
+  private val defaultPrimaryDns = "8.8.8.8"
+  private val defaultSecondaryDns = "8.8.4.4"
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
@@ -143,10 +145,14 @@ class MainActivity : PppVpnActivity() {
         val primaryDns = selectedUserConfig.value!!.dns1.trim()
         val secondaryDns = selectedUserConfig.value!!.dns2.trim()
         val dnsServers = linkedSetOf<String>()
-        if (primaryDns.isNotEmpty()) {
+        val shouldIgnorePrimaryDefault =
+          routingPreferences.forceRemoteDns && primaryDns == defaultPrimaryDns
+        val shouldIgnoreSecondaryDefault =
+          routingPreferences.forceRemoteDns && secondaryDns == defaultSecondaryDns
+        if (primaryDns.isNotEmpty() && !shouldIgnorePrimaryDefault) {
           dnsServers.add(primaryDns)
         }
-        if (secondaryDns.isNotEmpty()) {
+        if (secondaryDns.isNotEmpty() && !shouldIgnoreSecondaryDefault) {
           dnsServers.add(secondaryDns)
         }
         if (routingPreferences.forceRemoteDns && dnsServers.isEmpty()) {
@@ -156,8 +162,8 @@ class MainActivity : PppVpnActivity() {
           if (routingPreferences.forceRemoteDns) {
             Log.w(TAG, "forceRemoteDns enabled but no remote servers discovered; using legacy defaults")
           }
-          dnsServers.add("8.8.8.8")
-          dnsServers.add("8.8.4.4")
+          dnsServers.add(defaultPrimaryDns)
+          dnsServers.add(defaultSecondaryDns)
         }
         dnsServers.forEach { add(it) }
       }
