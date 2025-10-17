@@ -60,6 +60,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.lifecycleScope
@@ -118,6 +119,8 @@ class MainActivity : PppVpnActivity() {
     }
     Log.i(TAG, "running using config: ${selectedUserConfig.value!!}")
     val rawReader = RawReader(resources)
+    val encryptionPreferences = settings.getEncryptionPreferences()
+    val serverProxy = settings.getServerProxy()
     val config = VPNLinkConfiguration().apply {
       SubnetAddress = "255.255.255.0"
       IPAddress = selectedUserConfig.value!!.tun_address.toString()
@@ -142,14 +145,14 @@ class MainActivity : PppVpnActivity() {
 
       VPNConfiguration.apply {
         key.apply {
-          kf = 154543927
-          kx = 128
-          kl = 10
-          kh = 12
-          protocol = "aes-128-cfb"
-          protocol_key = "N6HMzdUs7IUnYHwq"
-          transport = "aes-256-cfb"
-          transport_key = "HWFweXu2g5RVMEpy"
+          kf = encryptionPreferences.kf
+          kx = encryptionPreferences.kx
+          kl = encryptionPreferences.kl
+          kh = encryptionPreferences.kh
+          protocol = encryptionPreferences.protocol
+          protocol_key = encryptionPreferences.protocolKey
+          transport = encryptionPreferences.transport
+          transport_key = encryptionPreferences.transportKey
           masked = false
           plaintext = false
           delta_encode = false
@@ -210,6 +213,7 @@ class MainActivity : PppVpnActivity() {
           Log.d(TAG, "client guid: $guid")
           server = VPN.vpn_link_of(selectedUserConfig.value!!.server.toString())!!.url
           Log.d(TAG, "client server: $server")
+          server_proxy = serverProxy
           bandwidth = 0
           reconnections.timeout = Macro.PPP_TCP_CONNECT_TIMEOUT
 
@@ -426,7 +430,9 @@ class MainActivity : PppVpnActivity() {
           .padding(8.dp),
         horizontalArrangement = Arrangement.SpaceEvenly
       ) {
-        val testText = remember { mutableStateOf("Test") }
+        val testLabel = getString(R.string.vpn_test)
+        val testingLabel = getString(R.string.vpn_testing)
+        val testText = remember { mutableStateOf(testLabel) }
         var startText by remember { mutableStateOf(getString(R.string.vpn_start)) }
 
         // 开始按钮
@@ -443,7 +449,7 @@ class MainActivity : PppVpnActivity() {
             }
             vpn_run()
             vpnRunning = true
-            testText.value = "Test"
+            testText.value = testLabel
             selectedUserConfig.value?.name?.let { startText = it }
           },
           enabled = vpnRunning.not()
@@ -452,10 +458,10 @@ class MainActivity : PppVpnActivity() {
         }
         if (vpnRunning) {
           Button(onClick = {
-            if (testText.value != "Testing...") {
+            if (testText.value != testingLabel) {
               testConnection(testText)
             }
-            testText.value = "Testing..."
+            testText.value = testingLabel
           }) {
             Text(testText.value)
           }
@@ -574,7 +580,7 @@ class MainActivity : PppVpnActivity() {
               readOnly = true,
               onValueChange = { guid = it },
               label = { Text(getString(R.string.config_guid)) },
-              placeholder = { Text("Random") },
+              placeholder = { Text(getString(R.string.placeholder_random)) },
               keyboardOptions = dialogKeyboardOptions,
               keyboardActions = dialogKeyboardActions
             )
@@ -620,7 +626,7 @@ class MainActivity : PppVpnActivity() {
               e.printStackTrace()
               Toast.makeText(
                 this,
-                "Invalid supersocksr.ppp.android.utils.Address: ${e.message}",
+                getString(R.string.toast_invalid_address, e.message ?: ""),
                 Toast.LENGTH_LONG
               )
                 .show()
@@ -661,37 +667,47 @@ class MainActivity : PppVpnActivity() {
       Log.d(TAG, "beginTime: $beginTime")
       try {
         client.newCall(request).execute().use { response ->
-          val result = if (response.isSuccessful) {
-            (System.currentTimeMillis() - beginTime).toString() + "ms"
+          if (response.isSuccessful) {
+            val duration = System.currentTimeMillis() - beginTime
+            withContext(Dispatchers.Main) {
+              state.value = getString(R.string.test_result_latency, duration)
+            }
           } else {
-            "-1 ms"
-          }
-          withContext(Dispatchers.Main) {
-            state.value = result
+            withContext(Dispatchers.Main) {
+              state.value = getString(R.string.test_result_http_error)
+            }
           }
         }
       } catch (e: Exception) {
         Log.e(TAG, "${e.cause}: ${e.message}")
         val tx = when (e.cause) {
           is ConnectException -> {
-            "No Connection"
+            getString(R.string.test_result_no_connection)
           }
 
           is UnknownHostException -> {
-            "Unknown Host"
+            getString(R.string.test_result_unknown_host)
           }
 
           is SocketTimeoutException -> {
-            "Timeout"
+            getString(R.string.test_result_timeout)
           }
 
           else -> {
-            "Error"
+            getString(R.string.test_result_error)
           }
         }
         withContext(Dispatchers.Main) {
           state.value = tx
-          Toast.makeText(this@MainActivity, "${e.cause}: ${e.message}", Toast.LENGTH_LONG).show()
+          Toast.makeText(
+            this@MainActivity,
+            getString(
+              R.string.toast_error_message,
+              e.cause?.toString() ?: getString(R.string.test_result_error),
+              e.message ?: ""
+            ),
+            Toast.LENGTH_LONG
+          ).show()
         }
       }
     }
@@ -704,7 +720,7 @@ fun DeleteButton(modifier: Modifier = Modifier, onClick: () -> Unit) {
   IconButton(onClick = onClick) {
     Icon(
       imageVector = Icons.Filled.Delete, // 使用 Material Design 的删除图标
-      contentDescription = "Delete",
+      contentDescription = stringResource(id = R.string.delete_content_description),
       tint = MaterialTheme.colorScheme.primary // 设置图标颜色
     )
   }
