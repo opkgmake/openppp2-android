@@ -106,6 +106,9 @@ class MainActivity : PppVpnActivity() {
   private val dnsRuleRewritePattern = Regex("/(\\d{1,3}(?:\\.\\d{1,3}){3})(/[^\\s]+)")
   private val defaultPrimaryDns = "8.8.8.8"
   private val defaultSecondaryDns = "8.8.4.4"
+  private val dnsRuleRewriteCache = mutableMapOf<String, String>()
+  private var cachedBypassIpRules: String? = null
+  private var cachedDnsRules: String? = null
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
@@ -122,12 +125,16 @@ class MainActivity : PppVpnActivity() {
       return null
     }
     Log.i(TAG, "running using config: ${selectedUserConfig.value!!}")
-    val rawReader = RawReader(resources)
     val encryptionPreferences = settings.getEncryptionPreferences()
     val serverProxy = settings.getServerProxy()
     val routingPreferences = settings.getRoutingPreferences()
-    val bypassIpRules = rawReader.readRawResource(R.raw.ip)
-    val rawDnsRules = rawReader.readRawResource(R.raw.domain)
+    val rawReader = RawReader(resources)
+    val bypassIpRules = cachedBypassIpRules ?: rawReader
+      .readRawResource(R.raw.ip)
+      .also { cachedBypassIpRules = it }
+    val rawDnsRules = cachedDnsRules ?: rawReader
+      .readRawResource(R.raw.domain)
+      .also { cachedDnsRules = it }
     var effectiveDnsRules = rawDnsRules
 
     val config = VPNLinkConfiguration().apply {
@@ -173,7 +180,7 @@ class MainActivity : PppVpnActivity() {
             .takeIf { it.isNotEmpty() }
           if (remoteDnsTargets != null) {
             Log.d(TAG, "forceRemoteDns rewriting domain rules for $remoteDnsTargets")
-            effectiveDnsRules = rewriteDnsRulesForRemoteDns(rawDnsRules, remoteDnsTargets)
+            effectiveDnsRules = getOrRewriteDnsRules(rawDnsRules, remoteDnsTargets)
           }
         }
         dnsServers.forEach { add(it) }
@@ -312,6 +319,22 @@ class MainActivity : PppVpnActivity() {
       }
     }
     return servers.toList()
+  }
+
+  private fun getOrRewriteDnsRules(
+    originalRules: String,
+    remoteServers: List<String>,
+  ): String {
+    val cacheKey = remoteServers.joinToString(separator = ",")
+    dnsRuleRewriteCache[cacheKey]?.let { return it }
+    val rewritten = try {
+      rewriteDnsRulesForRemoteDns(originalRules, remoteServers)
+    } catch (throwable: Throwable) {
+      Log.e(TAG, "failed to rewrite DNS rules for $remoteServers", throwable)
+      originalRules
+    }
+    dnsRuleRewriteCache[cacheKey] = rewritten
+    return rewritten
   }
 
   private fun rewriteDnsRulesForRemoteDns(rules: String, remoteServers: List<String>): String {
