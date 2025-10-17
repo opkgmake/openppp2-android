@@ -77,6 +77,7 @@ const val ROUTING_MODE_KEY = "routing_mode"
 const val ROUTING_ALLOWED_PACKAGES_KEY = "routing_allowed_packages"
 const val ROUTING_DISALLOWED_PACKAGES_KEY = "routing_disallowed_packages"
 const val ROUTING_FULL_TUNNEL_KEY = "routing_full_tunnel"
+const val ROUTING_FORCE_REMOTE_DNS_KEY = "routing_force_remote_dns"
 
 const val DEFAULT_ENCRYPTION_KF = 0x09362737
 const val DEFAULT_ENCRYPTION_KX = 128
@@ -106,6 +107,7 @@ data class RoutingPreferences(
   val whitelist: Set<String> = emptySet(),
   val blacklist: Set<String> = emptySet(),
   val fullTunnel: Boolean = false,
+  val forceRemoteDns: Boolean = false,
 )
 
 data class EncryptionPreferences(
@@ -257,11 +259,13 @@ class Settings(val context: Context, private val preferences: SharedPreferences)
     } else {
       false
     }
+    val forceRemoteDns = preferences.getBoolean(ROUTING_FORCE_REMOTE_DNS_KEY, false)
     return RoutingPreferences(
       mode = mode,
       whitelist = whitelist,
       blacklist = blacklist,
-      fullTunnel = fullTunnel
+      fullTunnel = fullTunnel,
+      forceRemoteDns = forceRemoteDns,
     )
   }
 
@@ -274,6 +278,7 @@ class Settings(val context: Context, private val preferences: SharedPreferences)
         ROUTING_FULL_TUNNEL_KEY,
         if (routingPreferences.mode == RoutingMode.GLOBAL) routingPreferences.fullTunnel else false
       )
+      .putBoolean(ROUTING_FORCE_REMOTE_DNS_KEY, routingPreferences.forceRemoteDns)
       .apply()
   }
 
@@ -529,6 +534,7 @@ class Settings(val context: Context, private val preferences: SharedPreferences)
     var apps by remember { mutableStateOf(listOf<PackageInformation>()) }
     var loadingApps by remember { mutableStateOf(true) }
     var fullTunnel by remember { mutableStateOf(initialPreferences.fullTunnel) }
+    var forceRemoteDns by remember { mutableStateOf(initialPreferences.forceRemoteDns) }
 
     LaunchedEffect(Unit) {
       loadingApps = true
@@ -583,6 +589,26 @@ class Settings(val context: Context, private val preferences: SharedPreferences)
                 modifier = Modifier
                   .padding(start = 8.dp)
                   .weight(1f)
+              )
+            }
+          }
+
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .clickable { forceRemoteDns = !forceRemoteDns },
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Checkbox(
+              checked = forceRemoteDns,
+              onCheckedChange = { checked -> forceRemoteDns = checked }
+            )
+            Column(modifier = Modifier.padding(start = 8.dp)) {
+              Text(text = context.getString(R.string.routing_force_remote_dns_label))
+              Text(
+                text = context.getString(R.string.routing_force_remote_dns_description),
+                fontSize = 12.sp,
+                color = Color.Gray
               )
             }
           }
@@ -736,7 +762,8 @@ class Settings(val context: Context, private val preferences: SharedPreferences)
                 mode = mode,
                 whitelist = whitelist,
                 blacklist = blacklist,
-                fullTunnel = if (mode == RoutingMode.GLOBAL) fullTunnel else false
+                fullTunnel = if (mode == RoutingMode.GLOBAL) fullTunnel else false,
+                forceRemoteDns = forceRemoteDns
               )
             )
             Toast.makeText(context, context.getString(R.string.toast_saved_success), Toast.LENGTH_SHORT).show()

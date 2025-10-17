@@ -59,6 +59,8 @@
     <string name="routing_full_tunnel_label">全部流量经过代理</string>
     <string name="routing_full_tunnel_description">忽略内置的直连 IP 与域名列表，让所有流量都通过 VPN。</string>
     <string name="routing_full_tunnel_hint_enabled">已启用全部流量代理模式，直连名单将不会生效。</string>
+    <string name="routing_force_remote_dns_label">强制远程 DNS</string>
+    <string name="routing_force_remote_dns_description">忽略系统默认 DNS，优先使用配置或规则中的服务器，避免泄露至 8.8.8.8 等地址。</string>
 
     <string name="vpn_test">测试</string>
     <string name="vpn_testing">测试中…</string>

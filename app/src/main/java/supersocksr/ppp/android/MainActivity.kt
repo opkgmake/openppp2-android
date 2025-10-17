@@ -102,6 +102,7 @@ class MainActivity : PppVpnActivity() {
   private lateinit var settingsPreferences: SharedPreferences
   private lateinit var settings: Settings
   private val selectedUserConfig: MutableState<UserConfig?> = mutableStateOf(null)
+  private val dnsAddressPattern = Regex("/(\\d{1,3}(?:\\.\\d{1,3}){3})/")
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
@@ -141,16 +142,24 @@ class MainActivity : PppVpnActivity() {
         clear()
         val primaryDns = selectedUserConfig.value!!.dns1.trim()
         val secondaryDns = selectedUserConfig.value!!.dns2.trim()
+        val dnsServers = linkedSetOf<String>()
         if (primaryDns.isNotEmpty()) {
-          add(primaryDns)
+          dnsServers.add(primaryDns)
         }
         if (secondaryDns.isNotEmpty()) {
-          add(secondaryDns)
+          dnsServers.add(secondaryDns)
         }
-        if (isEmpty()) {
-          add("8.8.8.8")
-          add("8.8.4.4")
+        if (routingPreferences.forceRemoteDns && dnsServers.isEmpty()) {
+          dnsServers.addAll(extractDnsServersFromRules(dnsRules))
         }
+        if (dnsServers.isEmpty()) {
+          if (routingPreferences.forceRemoteDns) {
+            Log.w(TAG, "forceRemoteDns enabled but no remote servers discovered; using legacy defaults")
+          }
+          dnsServers.add("8.8.8.8")
+          dnsServers.add("8.8.4.4")
+        }
+        dnsServers.forEach { add(it) }
       }
 
       if (routingPreferences.fullTunnel) {
@@ -269,6 +278,23 @@ class MainActivity : PppVpnActivity() {
 
     }
     return config
+  }
+
+  private fun extractDnsServersFromRules(rules: String, maxCount: Int = 2): List<String> {
+    if (rules.isEmpty()) {
+      return emptyList()
+    }
+    val servers = linkedSetOf<String>()
+    dnsAddressPattern.findAll(rules).forEach { matchResult ->
+      val candidate = matchResult.groupValues.getOrNull(1)?.trim().orEmpty()
+      if (candidate.isNotEmpty()) {
+        servers.add(candidate)
+        if (servers.size >= maxCount) {
+          return servers.toList()
+        }
+      }
+    }
+    return servers.toList()
   }
 
   // FIXME: this function actually cannot hide ime.
