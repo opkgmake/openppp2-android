@@ -2,6 +2,8 @@ package supersocksr.ppp.android
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.content.pm.PackageInfo
+import android.content.pm.PackageManager
 import android.util.Log
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
@@ -54,6 +56,7 @@ import supersocksr.ppp.android.openppp2.i.PackageInformation
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.items
 import androidx.compose.ui.graphics.Color
+import android.os.Build
 
 
 const val TEST_LINK_KEY = "test_link"
@@ -513,11 +516,7 @@ class Settings(val context: Context, private val preferences: SharedPreferences)
     LaunchedEffect(Unit) {
       loadingApps = true
       val loadedApps = withContext(Dispatchers.IO) {
-        try {
-          PackageX.package_get_all_network_application(context)
-        } catch (e: Exception) {
-          emptyList()
-        }
+        loadRoutingPackages(context)
       }
       apps = loadedApps.sortedBy { (it.applicationName ?: it.packageName ?: "").lowercase() }
       loadingApps = false
@@ -701,6 +700,74 @@ class Settings(val context: Context, private val preferences: SharedPreferences)
         }
       }
     )
+  }
+
+  private fun loadRoutingPackages(context: Context): List<PackageInformation> {
+    val combined = LinkedHashMap<String, PackageInformation>()
+
+    fun addPackage(info: PackageInformation?) {
+      val packageName = info?.packageName?.takeIf { it.isNotBlank() } ?: return
+      if (info.applicationName.isNullOrBlank()) {
+        info.applicationName = packageName
+      }
+      combined[packageName] = info
+    }
+
+    val defaultApps = try {
+      PackageX.package_get_all_network_application(context)
+    } catch (e: Exception) {
+      emptyList()
+    }
+    defaultApps.forEach(::addPackage)
+
+    val fallbackApps = loadInstalledPackages(context)
+    fallbackApps.forEach(::addPackage)
+
+    return combined.values.toList()
+  }
+
+  private fun loadInstalledPackages(context: Context): List<PackageInformation> {
+    val packageManager = context.packageManager ?: return emptyList()
+    val installedPackages: List<PackageInfo> = try {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        packageManager.getInstalledPackages(
+          PackageManager.PackageInfoFlags.of(
+            (PackageManager.GET_META_DATA or PackageManager.GET_PERMISSIONS).toLong()
+          )
+        )
+      } else {
+        @Suppress("DEPRECATION")
+        packageManager.getInstalledPackages(PackageManager.GET_META_DATA or PackageManager.GET_PERMISSIONS)
+      }
+    } catch (e: Exception) {
+      return emptyList()
+    }
+
+    val selfPackageName = context.packageName
+    val packages = mutableListOf<PackageInformation>()
+
+    installedPackages.forEach { packageInfo ->
+      val packageName = packageInfo.packageName ?: return@forEach
+      if (packageName == selfPackageName) {
+        return@forEach
+      }
+
+      val applicationInfo = packageInfo.applicationInfo ?: return@forEach
+
+      try {
+        val label = applicationInfo.loadLabel(packageManager)?.toString()
+        val info = PackageInformation().apply {
+          this.packageName = packageName
+          this.applicationName = if (!label.isNullOrBlank()) label else packageName
+          this.applicationIcon = applicationInfo.loadIcon(packageManager)
+        }
+        packages.add(info)
+      } catch (ignored: Exception) {
+        // Skip apps that cannot provide label or icon
+      }
+    }
+
+    return packages
   }
 
   @Composable
