@@ -52,11 +52,15 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.SnapshotStateList
+import androidx.annotation.StringRes
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
@@ -64,9 +68,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.lifecycleScope
-import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.google.android.material.textfield.TextInputEditText
 import kotlinx.coroutines.Dispatchers
@@ -98,19 +102,26 @@ import java.util.concurrent.TimeUnit
 const val TAG = "MainActivity"
 const val ALL_CONFIGS_KEY = "all_configs"
 
+private enum class MainDestination(val route: String, val icon: ImageVector, @StringRes val labelRes: Int) {
+  HOME("home", Icons.Default.Home, R.string.nav_home),
+  SETTINGS("settings", Icons.Default.Settings, R.string.nav_settings)
+}
+
 class MainActivity : PppVpnActivity() {
   private val userConfigListSerializer = ListSerializer(UserConfig.serializer())
   private lateinit var configPreferences: SharedPreferences
   private lateinit var settingsPreferences: SharedPreferences
-  private lateinit var settings: Settings
+  private lateinit var settingsRepository: SettingsRepository
   private val selectedUserConfig: MutableState<UserConfig?> = mutableStateOf(null)
-  private val dnsAddressPattern = Regex("/(\\d{1,3}(?:\\.\\d{1,3}){3})/")
-  private val defaultPrimaryDns = "8.8.8.8"
-  private val defaultSecondaryDns = "8.8.4.4"
   private val userConfigJson = Json {
     ignoreUnknownKeys = true
     encodeDefaults = true
   }
+  private val configList = mutableStateListOf<UserConfig>()
+  private var selectedConfigIndex by mutableIntStateOf(-1)
+  private var vpnRunning by mutableStateOf(false)
+  private val defaultPrimaryDns = "8.8.8.8"
+  private val defaultSecondaryDns = "8.8.4.4"
   private var cachedBypassIpRules: String? = null
   private var cachedDnsRules: String? = null
 
@@ -118,10 +129,95 @@ class MainActivity : PppVpnActivity() {
     super.onCreate(savedInstanceState)
     configPreferences = getSharedPreferences("config_list", Context.MODE_PRIVATE)
     settingsPreferences = getSharedPreferences("settings", Context.MODE_PRIVATE)
-    settings = Settings(this, settingsPreferences)
-    setContent {
-      Openppp2Theme { App() }
+    settingsRepository = SettingsRepository(this, settingsPreferences)
+    restoreConfigs()
+    vpnRunning = vpn_state() != LIBOPENPPP2_LINK_STATE_CLIENT_UNINITIALIZED
+    setContent { Openppp2Theme { OpenpppApp() } }
+  }
+
+  private fun restoreConfigs() {
+    val serialized = configPreferences.getString(ALL_CONFIGS_KEY, "[]") ?: "[]"
+    val storedConfigs = try {
+      userConfigJson.decodeFromString(userConfigListSerializer, serialized)
+    } catch (error: Exception) {
+      Toast.makeText(
+        applicationContext,
+        getString(R.string.warn_deserialize),
+        Toast.LENGTH_LONG
+      ).show()
+      emptyList()
     }
+
+    configList.clear()
+    configList.addAll(storedConfigs)
+    if (selectedConfigIndex >= configList.size) {
+      selectedConfigIndex = -1
+    }
+    selectedUserConfig.value = selectedConfigIndex.takeIf { it in configList.indices }
+      ?.let { configList[it] }
+  }
+
+  private fun persistConfigs() {
+    val serialized = userConfigJson.encodeToString(
+      userConfigListSerializer,
+      configList.toList()
+    )
+    configPreferences.edit().putString(ALL_CONFIGS_KEY, serialized).apply()
+  }
+
+  private fun selectConfig(index: Int?) {
+    val normalized = index?.takeIf { it in configList.indices } ?: -1
+    selectedConfigIndex = normalized
+    selectedUserConfig.value = normalized.takeIf { it >= 0 }?.let { configList[it] }
+    Log.d(TAG, "selected config index: $normalized")
+  }
+
+  private fun appendEmptyConfig() {
+    configList.add(UserConfig())
+    persistConfigs()
+  }
+
+  private fun updateConfig(index: Int, config: UserConfig) {
+    if (index !in configList.indices) {
+      return
+    }
+    configList[index] = config
+    if (selectedConfigIndex == index) {
+      selectedUserConfig.value = config
+    }
+    persistConfigs()
+  }
+
+  private fun removeConfig(index: Int) {
+    if (index !in configList.indices) {
+      return
+    }
+    val previousSelection = selectedConfigIndex
+    configList.removeAt(index)
+    persistConfigs()
+
+    if (configList.isEmpty()) {
+      selectConfig(null)
+      return
+    }
+
+    val newSelection = when {
+      previousSelection == -1 -> null
+      index == previousSelection -> minOf(index, configList.lastIndex)
+      index < previousSelection -> previousSelection - 1
+      else -> previousSelection
+    }
+    selectConfig(newSelection)
+  }
+
+  private fun startVpn() {
+    vpn_run()
+    vpnRunning = true
+  }
+
+  private fun stopVpn() {
+    vpn_stop()
+    vpnRunning = false
   }
 
   override fun vpn_load(): VPNLinkConfiguration? {
@@ -129,9 +225,9 @@ class MainActivity : PppVpnActivity() {
       return null
     }
     Log.i(TAG, "running using config: ${selectedUserConfig.value!!}")
-    val encryptionPreferences = settings.getEncryptionPreferences()
-    val serverProxy = settings.getServerProxy()
-    val routingPreferences = settings.getRoutingPreferences()
+    val encryptionPreferences = settingsRepository.readEncryptionPreferences()
+    val serverProxy = settingsRepository.readServerProxy()
+    val routingPreferences = settingsRepository.readRoutingPreferences()
     val rawReader = RawReader(resources)
     val bypassIpRules = cachedBypassIpRules ?: rawReader
       .readRawResource(R.raw.ip)
@@ -140,7 +236,6 @@ class MainActivity : PppVpnActivity() {
       .readRawResource(R.raw.domain)
       .also { cachedDnsRules = it }
     val effectiveDnsRules = rawDnsRules
-    var usedRuleDerivedServers = false
 
     val config = VPNLinkConfiguration().apply {
       SubnetAddress = "255.255.255.0"
@@ -156,25 +251,8 @@ class MainActivity : PppVpnActivity() {
       AtomicHttpProxySet = false
       DnsAddresses.apply {
         clear()
-        val dnsServers = linkedSetOf<String>()
-        if (routingPreferences.forceRemoteDns) {
-          val fallbackServers = extractDnsServersFromRules(rawDnsRules)
-          if (fallbackServers.isNotEmpty()) {
-            usedRuleDerivedServers = true
-            dnsServers.addAll(fallbackServers)
-          } else {
-            Log.w(TAG, "forceRemoteDns enabled but no remote servers discovered; using legacy defaults")
-          }
-        }
-        if (dnsServers.isEmpty()) {
-          dnsServers.add(defaultPrimaryDns)
-          dnsServers.add(defaultSecondaryDns)
-        }
-        dnsServers.forEach { add(it) }
-      }
-
-      if (routingPreferences.forceRemoteDns && usedRuleDerivedServers) {
-        Log.i(TAG, "forceRemoteDns relying on bundled DNS rules for resolver selection")
+        add(defaultPrimaryDns)
+        add(defaultSecondaryDns)
       }
 
       if (routingPreferences.fullTunnel) {
@@ -295,23 +373,6 @@ class MainActivity : PppVpnActivity() {
     return config
   }
 
-  private fun extractDnsServersFromRules(rules: String, maxCount: Int = 2): List<String> {
-    if (rules.isEmpty()) {
-      return emptyList()
-    }
-    val servers = linkedSetOf<String>()
-    dnsAddressPattern.findAll(rules).forEach { matchResult ->
-      val candidate = matchResult.groupValues.getOrNull(1)?.trim().orEmpty()
-      if (candidate.isNotEmpty()) {
-        servers.add(candidate)
-        if (servers.size >= maxCount) {
-          return servers.toList()
-        }
-      }
-    }
-    return servers.toList()
-  }
-
   // FIXME: this function actually cannot hide ime.
   private fun hideIME(view: View? = null) {
     val focusedView = currentFocus
@@ -324,64 +385,70 @@ class MainActivity : PppVpnActivity() {
     imm.hideSoftInputFromWindow((view ?: focusedView).windowToken, 0)
   }
 
-  // 全应用，底部导航栏
   @Composable
-  fun App() {
+  private fun OpenpppApp() {
     val navController = rememberNavController()
-    val selectedTab = remember { mutableIntStateOf(0) } // 当前选中的按钮索引
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = navBackStackEntry?.destination?.route ?: MainDestination.HOME.route
 
     Scaffold(
       bottomBar = {
         BottomNavigationBar(
-          navController = navController,
-          selectedTab = selectedTab
+          currentRoute = currentRoute,
+          onNavigate = { destination ->
+            navController.navigate(destination.route) {
+              popUpTo(navController.graph.startDestinationId) { saveState = true }
+              launchSingleTop = true
+              restoreState = true
+            }
+          }
         )
       }
     ) { innerPadding ->
       NavHost(
         navController = navController,
-        startDestination = "home",
-        Modifier.padding(innerPadding)
+        startDestination = MainDestination.HOME.route,
+        modifier = Modifier.padding(innerPadding)
       ) {
-        composable("home") { ConfigSelectionScreen(navController) }
-        composable("settings") { settings.SettingsScreen() }
+        composable(MainDestination.HOME.route) {
+          ConfigSelectionScreen(
+            configs = configList,
+            selectedIndex = selectedConfigIndex.takeIf { it >= 0 },
+            onSelectConfig = ::selectConfig,
+            onAddConfig = ::appendEmptyConfig,
+            onUpdateConfig = ::updateConfig,
+            onDeleteConfig = ::removeConfig,
+            vpnRunning = vpnRunning,
+            onStartVpn = ::startVpn,
+            onStopVpn = ::stopVpn,
+            onRequestTest = ::testConnection
+          )
+        }
+        composable(MainDestination.SETTINGS.route) {
+          SettingsScreen(settingsRepository)
+        }
       }
     }
   }
 
-  // 底部导航栏
   @Composable
-  fun BottomNavigationBar(navController: NavHostController, selectedTab: MutableState<Int>) {
-    data class NavItem(val route: String, val label: String, val icon: ImageVector)
-
-    val items = listOf(
-      NavItem("home", getString(R.string.nav_home), Icons.Default.Home),
-      NavItem("settings", getString(R.string.nav_settings), Icons.Default.Settings),
-    )
-
-    NavigationBar(
-      tonalElevation = 8.dp
-    ) {
-      items.forEachIndexed { index, item ->
-        val isSelected = index == selectedTab.value
-
+  private fun BottomNavigationBar(
+    currentRoute: String,
+    onNavigate: (MainDestination) -> Unit
+  ) {
+    NavigationBar(tonalElevation = 8.dp) {
+      MainDestination.values().forEach { destination ->
+        val label = stringResource(destination.labelRes)
         NavigationBarItem(
           icon = {
             Icon(
-              imageVector = item.icon,
-              contentDescription = item.label
+              imageVector = destination.icon,
+              contentDescription = label
             )
           },
-          label = { Text(item.label) },
-          selected = isSelected,
-          onClick = {
-            selectedTab.value = index
-            navController.navigate(item.route) {
-              popUpTo(navController.graph.startDestinationId) { saveState = true }
-              launchSingleTop = true
-              restoreState = true
-            }
-          },
+          label = { Text(label) },
+          selected = currentRoute == destination.route,
+          onClick = { onNavigate(destination) },
           colors = NavigationBarItemDefaults.colors(
             selectedIconColor = Color.White,
             selectedTextColor = MaterialTheme.colorScheme.primary,
@@ -395,66 +462,41 @@ class MainActivity : PppVpnActivity() {
     }
   }
 
-  // 主界面，配置列表
   @Composable
-  fun ConfigSelectionScreen(navController: NavHostController) {
-    var selectedConfig by remember { mutableStateOf<Int?>(null) }
-    var isEditing by remember { mutableStateOf(false) }
-
-    // 拿到所有配置，如果反序列化失败（升级 openppp2 后数据格式不兼容）就清空所有当前配置。
-    val originalAllConfig = configPreferences.getString(ALL_CONFIGS_KEY, "[]")!!
-      .let {
-        try {
-          userConfigJson.decodeFromString(userConfigListSerializer, it)
-        } catch (e: Exception) {
-          Toast.makeText(
-            applicationContext,
-            getString(R.string.warn_deserialize),
-            Toast.LENGTH_LONG
-          ).show()
-          emptyList()
-        }
-      }.toMutableList()
-    val configListState = remember { mutableStateListOf(*originalAllConfig.toTypedArray()) }
-    var vpnRunning by remember { mutableStateOf(vpn_state() != LIBOPENPPP2_LINK_STATE_CLIENT_UNINITIALIZED) }
-
+  private fun ConfigSelectionScreen(
+    configs: SnapshotStateList<UserConfig>,
+    selectedIndex: Int?,
+    onSelectConfig: (Int?) -> Unit,
+    onAddConfig: () -> Unit,
+    onUpdateConfig: (Int, UserConfig) -> Unit,
+    onDeleteConfig: (Int) -> Unit,
+    vpnRunning: Boolean,
+    onStartVpn: () -> Unit,
+    onStopVpn: () -> Unit,
+    onRequestTest: (MutableState<String>) -> Unit
+  ) {
+    val context = LocalContext.current
+    var editingIndex by rememberSaveable { mutableStateOf<Int?>(null) }
     val itemModifier = Modifier
       .aspectRatio(1.85f, true)
       .padding(20.dp)
 
-    // functions
-    val select = { index: Int? ->
-      Log.d(TAG, "selected config index: $index")
-      selectedConfig = index
-      selectedUserConfig.value = index?.let { configListState[it] }
-    }
-    val persistAllConfig = {
-      Log.d(TAG, "persistAllConfig")
-      configPreferences.edit()
-        .putString(
-          ALL_CONFIGS_KEY,
-          userConfigJson.encodeToString(userConfigListSerializer, configListState)
-        ).apply()
-    }
-
-    // 主屏 UI
     Column {
       LazyVerticalGrid(
         columns = GridCells.Adaptive(120.dp),
         modifier = Modifier
           .weight(1f)
-          // 点击空白处取消选中
           .clickable(interactionSource = null, indication = null) {
-            if (isEditing) {
-              isEditing = false
+            if (editingIndex != null) {
+              editingIndex = null
             } else {
-              select(null)
+              onSelectConfig(null)
             }
           },
         contentPadding = PaddingValues(8.dp)
       ) {
-        itemsIndexed(configListState) { index, config ->
-          val isSelected = index == selectedConfig
+        itemsIndexed(configs) { index, config ->
+          val isSelected = selectedIndex == index
           val borderWidth by animateDpAsState(
             targetValue = if (isSelected) 4.dp else 0.dp,
             animationSpec = tween(durationMillis = 200)
@@ -474,10 +516,10 @@ class MainActivity : PppVpnActivity() {
               )
               .clickable {
                 if (isSelected) {
-                  isEditing = true
-                  Log.d(TAG, "Edit config: $index")
+                  editingIndex = index
                 } else {
-                  select(index)
+                  editingIndex = null
+                  onSelectConfig(index)
                 }
               },
             contentAlignment = Alignment.Center
@@ -496,9 +538,7 @@ class MainActivity : PppVpnActivity() {
             modifier = itemModifier
               .background(Color.Gray, RoundedCornerShape(8.dp))
               .clickable {
-                Log.i(TAG, "Add a new config")
-                configListState.add(UserConfig())
-                persistAllConfig()
+                onAddConfig()
               },
             contentAlignment = Alignment.Center
           ) {
@@ -513,70 +553,65 @@ class MainActivity : PppVpnActivity() {
           .padding(8.dp),
         horizontalArrangement = Arrangement.SpaceEvenly
       ) {
-        val testLabel = getString(R.string.vpn_test)
-        val testingLabel = getString(R.string.vpn_testing)
+        val testLabel = stringResource(R.string.vpn_test)
+        val testingLabel = stringResource(R.string.vpn_testing)
         val testText = remember { mutableStateOf(testLabel) }
-        var startText by remember { mutableStateOf(getString(R.string.vpn_start)) }
+        var startText by remember { mutableStateOf(stringResource(R.string.vpn_start)) }
 
-        // 开始按钮
         Button(
           onClick = {
-            if (selectedConfig == null) {
+            if (selectedIndex == null) {
               Toast.makeText(
-                this@MainActivity,
-                getString(R.string.warn_config_not_select),
+                context,
+                context.getString(R.string.warn_config_not_select),
                 Toast.LENGTH_SHORT
-              )
-                .show()
+              ).show()
               return@Button
             }
-            vpn_run()
-            vpnRunning = true
+            onStartVpn()
             testText.value = testLabel
-            selectedUserConfig.value?.name?.let { startText = it }
+            configs[selectedIndex].name.takeIf { it.isNotBlank() }?.let { startText = it }
           },
-          enabled = vpnRunning.not()
+          enabled = !vpnRunning
         ) {
           Text(startText)
         }
+
         if (vpnRunning) {
-          Button(onClick = {
-            if (testText.value != testingLabel) {
-              testConnection(testText)
+          Button(
+            onClick = {
+              if (testText.value != testingLabel) {
+                onRequestTest(testText)
+              }
+              testText.value = testingLabel
             }
-            testText.value = testingLabel
-          }) {
+          ) {
             Text(testText.value)
           }
         }
 
-        // 停止按钮
-        Button(onClick = {
-          vpn_stop()
-          vpnRunning = false
-          startText = getString(R.string.vpn_start)
-        }) {
-          Text(getString(R.string.vpn_stop))
+        Button(
+          onClick = {
+            onStopVpn()
+            startText = stringResource(R.string.vpn_start)
+          }
+        ) {
+          Text(stringResource(R.string.vpn_stop))
         }
       }
 
-      if (isEditing && selectedConfig != null) {
+      val editing = editingIndex
+      if (editing != null) {
         EditConfigDialog(
-          config = configListState[selectedConfig!!],
-          onDismiss = { isEditing = false },
-          onSave = { newConfigValue ->
-            // 点击保存按钮后，更新当前选中配置 + 持久化，关闭窗口
-            Log.d(TAG, "Save config: $newConfigValue")
-            configListState[selectedConfig!!] = newConfigValue
-            selectedUserConfig.value = newConfigValue
-            persistAllConfig()
-            isEditing = false
+          config = configs[editing],
+          onDismiss = { editingIndex = null },
+          onSave = { updated ->
+            onUpdateConfig(editing, updated)
+            editingIndex = null
           },
           onDelete = {
-            configListState.removeAt(selectedConfig!!)
-            persistAllConfig()
-            isEditing = false
-            select(null)
+            onDeleteConfig(editing)
+            editingIndex = null
           }
         )
       }
@@ -732,8 +767,9 @@ class MainActivity : PppVpnActivity() {
   private fun testConnection(state: MutableState<String>) {
     Log.i(TAG, "testConnection starting..")
     lifecycleScope.launch(Dispatchers.IO) {
-      val url = URL(settingsPreferences.getString(TEST_LINK_KEY, TEST_LINK_DEFAULT)!!)
-      val timeout = settingsPreferences.getLong(TIMEOUT_KEY, TIMEOUT_DEFAULT)
+      val options = settingsRepository.readTestOptions()
+      val url = URL(options.link)
+      val timeout = options.timeoutMs
       val client = OkHttpClient.Builder()
         .connectTimeout(timeout, TimeUnit.MILLISECONDS)
         .readTimeout(timeout, TimeUnit.MILLISECONDS)

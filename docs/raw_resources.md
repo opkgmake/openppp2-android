@@ -9,14 +9,12 @@ consumed when building the VPN runtime configuration:
   property so traffic targeting those networks can avoid proxying.
 - `domain.txt` – A newline-delimited domain rule set that associates host names with the
   resolver source `/223.5.5.5/nic`. During VPN configuration the file is read into
-  `DNSRuleList`, supplying domain-based routing rules for the embedded DNS engine. When the
-  "Proxy all DNS lookups" toggle is enabled the app extracts the remote resolver addresses
-  from these rules and uses them for VPN DNS servers, ensuring every query is proxied unless
-  the dataset yields no candidates (in which case it falls back to the legacy defaults).
+  `DNSRuleList`, supplying domain-based routing rules for the embedded DNS engine so DNS
+  queries can follow the curated policy instead of relying on upstream discovery.
 
 Both files are read at connect time through `RawReader.readRawResource` in
 `MainActivity` (see the `BypassIpList` and `DNSRuleList` assignments). Keeping the data in
 `res/raw` allows Android's resource system to package the lists efficiently while making
-runtime access straightforward. Even when the "proxy all traffic" preference is enabled we
-continue to load the domain rules so the embedded resolver keeps using the curated rule
-set instead of falling back to slower upstream discovery.
+runtime access straightforward. Even when the "proxy all traffic" preference is enabled the
+domain rules continue to load so the embedded resolver can reuse the bundled policy instead
+of falling back to slower upstream discovery.

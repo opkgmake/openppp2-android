@@ -4,18 +4,20 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
+import android.os.Build
 import android.util.Log
 import android.widget.Toast
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
@@ -37,6 +39,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
@@ -53,11 +56,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import supersocksr.ppp.android.openppp2.PackageX
 import supersocksr.ppp.android.openppp2.i.PackageInformation
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.lazy.items
-import androidx.compose.ui.graphics.Color
-import android.os.Build
-
+import java.util.LinkedHashMap
 
 const val TEST_LINK_KEY = "test_link"
 const val TEST_LINK_DEFAULT = "http://cp.cloudflare.com"
@@ -77,7 +76,6 @@ const val ROUTING_MODE_KEY = "routing_mode"
 const val ROUTING_ALLOWED_PACKAGES_KEY = "routing_allowed_packages"
 const val ROUTING_DISALLOWED_PACKAGES_KEY = "routing_disallowed_packages"
 const val ROUTING_FULL_TUNNEL_KEY = "routing_full_tunnel"
-const val ROUTING_FORCE_REMOTE_DNS_KEY = "routing_force_remote_dns"
 
 const val DEFAULT_ENCRYPTION_KF = 0x09362737
 const val DEFAULT_ENCRYPTION_KX = 128
@@ -89,6 +87,8 @@ const val DEFAULT_ENCRYPTION_TRANSPORT = "aes-256-cfb"
 const val DEFAULT_ENCRYPTION_TRANSPORT_SECRET = "HWFweXu2g5RVMEpy"
 const val DEFAULT_SERVER_PROXY = ""
 const val DEFAULT_ROUTING_MODE = "global"
+
+private const val SETTINGS_TAG = "SettingsRepository"
 
 enum class RoutingMode(val storageValue: String) {
   GLOBAL("global"),
@@ -107,7 +107,6 @@ data class RoutingPreferences(
   val whitelist: Set<String> = emptySet(),
   val blacklist: Set<String> = emptySet(),
   val fullTunnel: Boolean = false,
-  val forceRemoteDns: Boolean = false,
 )
 
 data class EncryptionPreferences(
@@ -121,94 +120,13 @@ data class EncryptionPreferences(
   val transportKey: String = DEFAULT_ENCRYPTION_TRANSPORT_SECRET,
 )
 
+data class TestOptions(
+  val link: String = TEST_LINK_DEFAULT,
+  val timeoutMs: Long = TIMEOUT_DEFAULT,
+)
 
-class Settings(val context: Context, private val preferences: SharedPreferences) {
-  private val groupPaddingValues = PaddingValues(8.dp)
-
-  @Composable
-  fun SettingsScreen() {
-    val context = LocalContext.current
-    val state = rememberLazyListState()
-    var encryptionDialogOpened by remember { mutableStateOf(false) }
-    var serverProxyDialogOpened by remember { mutableStateOf(false) }
-    var routingDialogOpened by remember { mutableStateOf(false) }
-    var testOptionsDialogOpened by remember { mutableStateOf(false) }
-    var logDialogOpened by remember { mutableStateOf(false) }
-
-    LazyColumn(
-      modifier = Modifier
-        .fillMaxWidth()
-        .padding(0.dp),
-      state = state
-    ) {
-      item {
-        SettingsGroup(
-          modifier = Modifier,
-          title = { Text(context.getString(R.string.settings_group_vpn)) },
-          contentPadding = groupPaddingValues,
-          enabled = true
-        ) {
-          SettingsMenuLink(
-            title = { Text(context.getString(R.string.encryption_settings)) },
-            subtitle = { Text(context.getString(R.string.encryption_settings_subtitle)) }
-          ) {
-            encryptionDialogOpened = true
-          }
-
-          SettingsMenuLink(
-            title = { Text(context.getString(R.string.server_proxy_settings)) },
-            subtitle = { Text(context.getString(R.string.server_proxy_settings_subtitle)) }
-          ) {
-            serverProxyDialogOpened = true
-          }
-
-          SettingsMenuLink(
-            title = { Text(context.getString(R.string.routing_settings)) },
-            subtitle = { Text(context.getString(R.string.routing_settings_subtitle)) }
-          ) {
-            routingDialogOpened = true
-          }
-        }
-
-        SettingsGroup(
-          modifier = Modifier,
-          title = { Text(context.getString(R.string.settings_group_other)) },
-          contentPadding = groupPaddingValues,
-          enabled = true
-        ) {
-          SettingsMenuLink(
-            title = { Text(context.getString(R.string.test_options)) },
-            subtitle = { Text(context.getString(R.string.test_options_subtitle)) }
-          ) {
-            testOptionsDialogOpened = true
-          }
-
-          SettingsMenuLink(
-            title = { Text(context.getString(R.string.show_logs)) },
-          ) {
-            logDialogOpened = true
-          }
-        }
-        if (encryptionDialogOpened) {
-          EncryptionDialog { encryptionDialogOpened = false }
-        }
-        if (serverProxyDialogOpened) {
-          ServerProxyDialog { serverProxyDialogOpened = false }
-        }
-        if (routingDialogOpened) {
-          RoutingDialog { routingDialogOpened = false }
-        }
-        if (testOptionsDialogOpened) {
-          TestOptionsDialog { testOptionsDialogOpened = false }
-        }
-        if (logDialogOpened) {
-          LogDialog { logDialogOpened = false }
-        }
-      }
-    }
-  }
-
-  fun getEncryptionPreferences(): EncryptionPreferences {
+class SettingsRepository(private val context: Context, private val preferences: SharedPreferences) {
+  fun readEncryptionPreferences(): EncryptionPreferences {
     return EncryptionPreferences(
       kf = preferences.getInt(ENCRYPTION_KF_KEY, DEFAULT_ENCRYPTION_KF),
       kx = preferences.getInt(ENCRYPTION_KX_KEY, DEFAULT_ENCRYPTION_KX),
@@ -216,20 +134,16 @@ class Settings(val context: Context, private val preferences: SharedPreferences)
       kh = preferences.getInt(ENCRYPTION_KH_KEY, DEFAULT_ENCRYPTION_KH),
       protocol = preferences.getString(ENCRYPTION_PROTOCOL_KEY, DEFAULT_ENCRYPTION_PROTOCOL)
         ?: DEFAULT_ENCRYPTION_PROTOCOL,
-      protocolKey = preferences.getString(
-        ENCRYPTION_PROTOCOL_SECRET_KEY,
-        DEFAULT_ENCRYPTION_PROTOCOL_SECRET
-      ) ?: DEFAULT_ENCRYPTION_PROTOCOL_SECRET,
+      protocolKey = preferences.getString(ENCRYPTION_PROTOCOL_SECRET_KEY, DEFAULT_ENCRYPTION_PROTOCOL_SECRET)
+        ?: DEFAULT_ENCRYPTION_PROTOCOL_SECRET,
       transport = preferences.getString(ENCRYPTION_TRANSPORT_KEY, DEFAULT_ENCRYPTION_TRANSPORT)
         ?: DEFAULT_ENCRYPTION_TRANSPORT,
-      transportKey = preferences.getString(
-        ENCRYPTION_TRANSPORT_SECRET_KEY,
-        DEFAULT_ENCRYPTION_TRANSPORT_SECRET
-      ) ?: DEFAULT_ENCRYPTION_TRANSPORT_SECRET
+      transportKey = preferences.getString(ENCRYPTION_TRANSPORT_SECRET_KEY, DEFAULT_ENCRYPTION_TRANSPORT_SECRET)
+        ?: DEFAULT_ENCRYPTION_TRANSPORT_SECRET,
     )
   }
 
-  fun saveEncryptionPreferences(prefs: EncryptionPreferences) {
+  fun persistEncryptionPreferences(prefs: EncryptionPreferences) {
     preferences.edit()
       .putInt(ENCRYPTION_KF_KEY, prefs.kf)
       .putInt(ENCRYPTION_KX_KEY, prefs.kx)
@@ -242,15 +156,15 @@ class Settings(val context: Context, private val preferences: SharedPreferences)
       .apply()
   }
 
-  fun getServerProxy(): String {
+  fun readServerProxy(): String {
     return preferences.getString(SERVER_PROXY_KEY, DEFAULT_SERVER_PROXY) ?: DEFAULT_SERVER_PROXY
   }
 
-  fun saveServerProxy(value: String) {
+  fun persistServerProxy(value: String) {
     preferences.edit().putString(SERVER_PROXY_KEY, value).apply()
   }
 
-  fun getRoutingPreferences(): RoutingPreferences {
+  fun readRoutingPreferences(): RoutingPreferences {
     val mode = RoutingMode.fromStorage(preferences.getString(ROUTING_MODE_KEY, DEFAULT_ROUTING_MODE))
     val whitelist = preferences.getStringSet(ROUTING_ALLOWED_PACKAGES_KEY, emptySet())?.toSet() ?: emptySet()
     val blacklist = preferences.getStringSet(ROUTING_DISALLOWED_PACKAGES_KEY, emptySet())?.toSet() ?: emptySet()
@@ -259,529 +173,45 @@ class Settings(val context: Context, private val preferences: SharedPreferences)
     } else {
       false
     }
-    val forceRemoteDns = preferences.getBoolean(ROUTING_FORCE_REMOTE_DNS_KEY, false)
     return RoutingPreferences(
       mode = mode,
       whitelist = whitelist,
       blacklist = blacklist,
       fullTunnel = fullTunnel,
-      forceRemoteDns = forceRemoteDns,
     )
   }
 
-  fun saveRoutingPreferences(routingPreferences: RoutingPreferences) {
+  fun persistRoutingPreferences(preferencesToSave: RoutingPreferences) {
     preferences.edit()
-      .putString(ROUTING_MODE_KEY, routingPreferences.mode.storageValue)
-      .putStringSet(ROUTING_ALLOWED_PACKAGES_KEY, routingPreferences.whitelist.toSet())
-      .putStringSet(ROUTING_DISALLOWED_PACKAGES_KEY, routingPreferences.blacklist.toSet())
+      .putString(ROUTING_MODE_KEY, preferencesToSave.mode.storageValue)
+      .putStringSet(ROUTING_ALLOWED_PACKAGES_KEY, preferencesToSave.whitelist.toSet())
+      .putStringSet(ROUTING_DISALLOWED_PACKAGES_KEY, preferencesToSave.blacklist.toSet())
       .putBoolean(
         ROUTING_FULL_TUNNEL_KEY,
-        if (routingPreferences.mode == RoutingMode.GLOBAL) routingPreferences.fullTunnel else false
+        if (preferencesToSave.mode == RoutingMode.GLOBAL) preferencesToSave.fullTunnel else false
       )
-      .putBoolean(ROUTING_FORCE_REMOTE_DNS_KEY, routingPreferences.forceRemoteDns)
       .apply()
   }
 
-  private fun parseFlexibleInt(text: String): Int {
-    val value = text.trim()
-    if (value.isEmpty()) {
-      throw IllegalArgumentException(context.getString(R.string.toast_encryption_empty))
+  fun readTestOptions(): TestOptions {
+    val link = preferences.getString(TEST_LINK_KEY, TEST_LINK_DEFAULT) ?: TEST_LINK_DEFAULT
+    val stored = preferences.all[TIMEOUT_KEY]
+    val timeout = when (stored) {
+      is Int -> stored.toLong()
+      is Long -> stored
+      else -> TIMEOUT_DEFAULT
     }
-    return if (value.startsWith("0x", ignoreCase = true)) {
-      value.substring(2).toLong(16).toInt()
-    } else {
-      value.toInt()
-    }
+    return TestOptions(link = link, timeoutMs = timeout)
   }
 
-  private fun formatAsHex(value: Int): String {
-    return String.format("0x%08X", value)
+  fun persistTestOptions(options: TestOptions) {
+    preferences.edit()
+      .putString(TEST_LINK_KEY, options.link)
+      .putLong(TIMEOUT_KEY, options.timeoutMs)
+      .apply()
   }
 
-  @Composable
-  fun EncryptionDialog(onDismiss: () -> Unit) {
-    val current = getEncryptionPreferences()
-    var kf by remember { mutableStateOf(TextFieldValue(formatAsHex(current.kf))) }
-    var kx by remember { mutableStateOf(TextFieldValue(formatAsHex(current.kx))) }
-    var kl by remember { mutableStateOf(TextFieldValue(formatAsHex(current.kl))) }
-    var kh by remember { mutableStateOf(TextFieldValue(formatAsHex(current.kh))) }
-    var protocol by remember { mutableStateOf(TextFieldValue(current.protocol)) }
-    var protocolKey by remember { mutableStateOf(TextFieldValue(current.protocolKey)) }
-    var transport by remember { mutableStateOf(TextFieldValue(current.transport)) }
-    var transportKey by remember { mutableStateOf(TextFieldValue(current.transportKey)) }
-    val context = LocalContext.current
-    val keyboardController = LocalSoftwareKeyboardController.current
-    val keyboardActions = KeyboardActions(onDone = { keyboardController?.hide() })
-    val lazyListState = rememberLazyListState()
-
-    AlertDialog(
-      onDismissRequest = onDismiss,
-      title = {
-        Text(
-          text = context.getString(R.string.encryption_dialog_title),
-          fontSize = 22.sp
-        )
-      },
-      text = {
-        LazyColumn(state = lazyListState, contentPadding = PaddingValues(4.dp)) {
-          item {
-            OutlinedTextField(
-              modifier = Modifier
-                .fillMaxWidth()
-                .padding(8.dp),
-              value = kf,
-              onValueChange = { kf = it },
-              label = { Text(context.getString(R.string.encryption_kf)) },
-              keyboardOptions = KeyboardOptions(
-                imeAction = ImeAction.Next,
-                keyboardType = KeyboardType.Ascii
-              ),
-              keyboardActions = keyboardActions
-            )
-          }
-          item {
-            OutlinedTextField(
-              modifier = Modifier
-                .fillMaxWidth()
-                .padding(8.dp),
-              value = kx,
-              onValueChange = { kx = it },
-              label = { Text(context.getString(R.string.encryption_kx)) },
-              keyboardOptions = KeyboardOptions(
-                imeAction = ImeAction.Next,
-                keyboardType = KeyboardType.Ascii
-              ),
-              keyboardActions = keyboardActions
-            )
-          }
-          item {
-            OutlinedTextField(
-              modifier = Modifier
-                .fillMaxWidth()
-                .padding(8.dp),
-              value = kl,
-              onValueChange = { kl = it },
-              label = { Text(context.getString(R.string.encryption_kl)) },
-              keyboardOptions = KeyboardOptions(
-                imeAction = ImeAction.Next,
-                keyboardType = KeyboardType.Ascii
-              ),
-              keyboardActions = keyboardActions
-            )
-          }
-          item {
-            OutlinedTextField(
-              modifier = Modifier
-                .fillMaxWidth()
-                .padding(8.dp),
-              value = kh,
-              onValueChange = { kh = it },
-              label = { Text(context.getString(R.string.encryption_kh)) },
-              keyboardOptions = KeyboardOptions(
-                imeAction = ImeAction.Next,
-                keyboardType = KeyboardType.Ascii
-              ),
-              keyboardActions = keyboardActions
-            )
-          }
-          item {
-            OutlinedTextField(
-              modifier = Modifier
-                .fillMaxWidth()
-                .padding(8.dp),
-              value = protocol,
-              onValueChange = { protocol = it },
-              label = { Text(context.getString(R.string.encryption_protocol)) },
-              keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Next),
-              keyboardActions = keyboardActions
-            )
-          }
-          item {
-            OutlinedTextField(
-              modifier = Modifier
-                .fillMaxWidth()
-                .padding(8.dp),
-              value = protocolKey,
-              onValueChange = { protocolKey = it },
-              label = { Text(context.getString(R.string.encryption_protocol_key)) },
-              keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Next),
-              keyboardActions = keyboardActions
-            )
-          }
-          item {
-            OutlinedTextField(
-              modifier = Modifier
-                .fillMaxWidth()
-                .padding(8.dp),
-              value = transport,
-              onValueChange = { transport = it },
-              label = { Text(context.getString(R.string.encryption_transport)) },
-              keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Next),
-              keyboardActions = keyboardActions
-            )
-          }
-          item {
-            OutlinedTextField(
-              modifier = Modifier
-                .fillMaxWidth()
-                .padding(8.dp),
-              value = transportKey,
-              onValueChange = { transportKey = it },
-              label = { Text(context.getString(R.string.encryption_transport_key)) },
-              keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Done),
-              keyboardActions = keyboardActions
-            )
-          }
-        }
-      },
-      confirmButton = {
-        Button(
-          onClick = {
-            try {
-              val prefs = EncryptionPreferences(
-                kf = parseFlexibleInt(kf.text),
-                kx = parseFlexibleInt(kx.text),
-                kl = parseFlexibleInt(kl.text),
-                kh = parseFlexibleInt(kh.text),
-                protocol = protocol.text.trim(),
-                protocolKey = protocolKey.text.trim(),
-                transport = transport.text.trim(),
-                transportKey = transportKey.text.trim()
-              )
-              saveEncryptionPreferences(prefs)
-              Toast.makeText(context, context.getString(R.string.toast_saved_success), Toast.LENGTH_SHORT)
-                .show()
-              onDismiss()
-            } catch (e: NumberFormatException) {
-              Toast.makeText(context, context.getString(R.string.toast_encryption_invalid_number), Toast.LENGTH_SHORT)
-                .show()
-            } catch (e: IllegalArgumentException) {
-              Toast.makeText(context, e.message ?: context.getString(R.string.toast_encryption_invalid_number), Toast.LENGTH_SHORT)
-                .show()
-            } catch (e: Exception) {
-              Toast.makeText(context, context.getString(R.string.toast_encryption_invalid_number), Toast.LENGTH_SHORT)
-                .show()
-            }
-          }
-        ) {
-          Text(context.getString(R.string.save))
-        }
-      },
-      dismissButton = {
-        Button(onClick = onDismiss) {
-          Text(context.getString(R.string.cancel))
-        }
-      }
-    )
-  }
-
-  @Composable
-  fun ServerProxyDialog(onDismiss: () -> Unit) {
-    var serverProxy by remember { mutableStateOf(TextFieldValue(getServerProxy())) }
-    val context = LocalContext.current
-    val keyboardController = LocalSoftwareKeyboardController.current
-
-    AlertDialog(
-      onDismissRequest = onDismiss,
-      title = {
-        Text(
-          text = context.getString(R.string.server_proxy_dialog_title),
-          fontSize = 22.sp
-        )
-      },
-      text = {
-        OutlinedTextField(
-          modifier = Modifier
-            .fillMaxWidth()
-            .padding(8.dp),
-          value = serverProxy,
-          onValueChange = { serverProxy = it },
-          label = { Text(context.getString(R.string.server_proxy_label)) },
-          placeholder = { Text(context.getString(R.string.server_proxy_placeholder)) },
-          keyboardOptions = KeyboardOptions(
-            imeAction = ImeAction.Done,
-            keyboardType = KeyboardType.Uri
-          ),
-          keyboardActions = KeyboardActions(onDone = { keyboardController?.hide() })
-        )
-      },
-      confirmButton = {
-        Button(
-          onClick = {
-            saveServerProxy(serverProxy.text.trim())
-            Toast.makeText(context, context.getString(R.string.toast_saved_success), Toast.LENGTH_SHORT).show()
-            onDismiss()
-          }
-        ) {
-          Text(context.getString(R.string.save))
-        }
-      },
-      dismissButton = {
-        Button(onClick = onDismiss) {
-          Text(context.getString(R.string.cancel))
-        }
-      }
-    )
-  }
-
-  @Composable
-  fun RoutingDialog(onDismiss: () -> Unit) {
-    val context = LocalContext.current
-    val initialPreferences = remember { getRoutingPreferences() }
-    var mode by remember { mutableStateOf(initialPreferences.mode) }
-    var whitelist by remember { mutableStateOf(initialPreferences.whitelist) }
-    var blacklist by remember { mutableStateOf(initialPreferences.blacklist) }
-    var apps by remember { mutableStateOf(listOf<PackageInformation>()) }
-    var loadingApps by remember { mutableStateOf(true) }
-    var fullTunnel by remember { mutableStateOf(initialPreferences.fullTunnel) }
-    var forceRemoteDns by remember { mutableStateOf(initialPreferences.forceRemoteDns) }
-
-    LaunchedEffect(Unit) {
-      loadingApps = true
-      val loadedApps = withContext(Dispatchers.IO) {
-        loadRoutingPackages(context)
-      }
-      apps = loadedApps.sortedBy { (it.applicationName ?: it.packageName ?: "").lowercase() }
-      loadingApps = false
-    }
-
-    AlertDialog(
-      onDismissRequest = onDismiss,
-      title = {
-        Text(
-          text = context.getString(R.string.routing_dialog_title),
-          fontSize = 22.sp
-        )
-      },
-      text = {
-        Column(
-          modifier = Modifier.fillMaxWidth(),
-          verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-          RoutingMode.values().forEach { option ->
-            val labelRes = when (option) {
-              RoutingMode.GLOBAL -> R.string.routing_mode_global
-              RoutingMode.WHITELIST -> R.string.routing_mode_whitelist
-              RoutingMode.BLACKLIST -> R.string.routing_mode_blacklist
-            }
-            Row(
-              modifier = Modifier
-                .fillMaxWidth()
-                .clickable {
-                  mode = option
-                  if (option != RoutingMode.GLOBAL) {
-                    fullTunnel = false
-                  }
-                },
-              verticalAlignment = Alignment.CenterVertically
-            ) {
-              RadioButton(
-                selected = mode == option,
-                onClick = {
-                  mode = option
-                  if (option != RoutingMode.GLOBAL) {
-                    fullTunnel = false
-                  }
-                }
-              )
-              Text(
-                text = context.getString(labelRes),
-                modifier = Modifier
-                  .padding(start = 8.dp)
-                  .weight(1f)
-              )
-            }
-          }
-
-          Row(
-            modifier = Modifier
-              .fillMaxWidth()
-              .clickable { forceRemoteDns = !forceRemoteDns },
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            Checkbox(
-              checked = forceRemoteDns,
-              onCheckedChange = { checked -> forceRemoteDns = checked }
-            )
-            Column(modifier = Modifier.padding(start = 8.dp)) {
-              Text(text = context.getString(R.string.routing_force_remote_dns_label))
-              Text(
-                text = context.getString(R.string.routing_force_remote_dns_description),
-                fontSize = 12.sp,
-                color = Color.Gray
-              )
-            }
-          }
-
-          when (mode) {
-            RoutingMode.GLOBAL -> {
-              Row(
-                modifier = Modifier
-                  .fillMaxWidth()
-                  .clickable { fullTunnel = !fullTunnel },
-                verticalAlignment = Alignment.CenterVertically
-              ) {
-                Checkbox(
-                  checked = fullTunnel,
-                  onCheckedChange = { checked -> fullTunnel = checked }
-                )
-                Column(modifier = Modifier.padding(start = 8.dp)) {
-                  Text(text = context.getString(R.string.routing_full_tunnel_label))
-                  Text(
-                    text = context.getString(R.string.routing_full_tunnel_description),
-                    fontSize = 12.sp,
-                    color = Color.Gray
-                  )
-                }
-              }
-              val hintRes = if (fullTunnel) {
-                R.string.routing_full_tunnel_hint_enabled
-              } else {
-                R.string.routing_mode_global_hint
-              }
-              Text(text = context.getString(hintRes))
-            }
-
-            RoutingMode.WHITELIST, RoutingMode.BLACKLIST -> {
-              val hintRes = if (mode == RoutingMode.WHITELIST) {
-                R.string.routing_app_list_whitelist
-              } else {
-                R.string.routing_app_list_blacklist
-              }
-              Text(
-                text = context.getString(hintRes),
-                fontWeight = FontWeight.Medium
-              )
-              if (loadingApps) {
-                Row(
-                  modifier = Modifier.fillMaxWidth(),
-                  horizontalArrangement = Arrangement.Center
-                ) {
-                  CircularProgressIndicator()
-                }
-              } else if (apps.isEmpty()) {
-                Text(text = context.getString(R.string.routing_empty_apps))
-              } else {
-                LazyColumn(
-                  modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 360.dp)
-                ) {
-                  items(apps) { app ->
-                    val packageName = app.packageName ?: return@items
-                    val isChecked = when (mode) {
-                      RoutingMode.WHITELIST -> whitelist.contains(packageName)
-                      RoutingMode.BLACKLIST -> blacklist.contains(packageName)
-                      else -> false
-                    }
-                    Row(
-                      modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                          when (mode) {
-                            RoutingMode.WHITELIST -> {
-                              whitelist = whitelist.toMutableSet().also {
-                                if (!isChecked) {
-                                  it.add(packageName)
-                                } else {
-                                  it.remove(packageName)
-                                }
-                              }
-                            }
-
-                            RoutingMode.BLACKLIST -> {
-                              blacklist = blacklist.toMutableSet().also {
-                                if (!isChecked) {
-                                  it.add(packageName)
-                                } else {
-                                  it.remove(packageName)
-                                }
-                              }
-                            }
-
-                            else -> {}
-                          }
-                        }
-                        .padding(vertical = 8.dp),
-                      verticalAlignment = Alignment.CenterVertically
-                    ) {
-                      Checkbox(
-                        checked = isChecked,
-                        onCheckedChange = { checked ->
-                          when (mode) {
-                            RoutingMode.WHITELIST -> {
-                              whitelist = whitelist.toMutableSet().also {
-                                if (checked) {
-                                  it.add(packageName)
-                                } else {
-                                  it.remove(packageName)
-                                }
-                              }
-                            }
-
-                            RoutingMode.BLACKLIST -> {
-                              blacklist = blacklist.toMutableSet().also {
-                                if (checked) {
-                                  it.add(packageName)
-                                } else {
-                                  it.remove(packageName)
-                                }
-                              }
-                            }
-
-                            else -> {}
-                          }
-                        }
-                      )
-                      Column(modifier = Modifier.padding(start = 8.dp)) {
-                        Text(
-                          text = app.applicationName ?: packageName,
-                          fontSize = 16.sp,
-                          maxLines = 1,
-                          overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                          text = packageName,
-                          fontSize = 12.sp,
-                          color = Color.Gray
-                        )
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      confirmButton = {
-        Button(
-          onClick = {
-            saveRoutingPreferences(
-              RoutingPreferences(
-                mode = mode,
-                whitelist = whitelist,
-                blacklist = blacklist,
-                fullTunnel = if (mode == RoutingMode.GLOBAL) fullTunnel else false,
-                forceRemoteDns = forceRemoteDns
-              )
-            )
-            Toast.makeText(context, context.getString(R.string.toast_saved_success), Toast.LENGTH_SHORT).show()
-            onDismiss()
-          }
-        ) {
-          Text(context.getString(R.string.save))
-        }
-      },
-      dismissButton = {
-        Button(onClick = onDismiss) {
-          Text(context.getString(R.string.cancel))
-        }
-      }
-    )
-  }
-
-  private fun loadRoutingPackages(context: Context): List<PackageInformation> {
+  fun queryRoutingPackages(): List<PackageInformation> {
     val combined = LinkedHashMap<String, PackageInformation>()
 
     fun addPackage(info: PackageInformation?) {
@@ -799,13 +229,23 @@ class Settings(val context: Context, private val preferences: SharedPreferences)
     }
     defaultApps.forEach(::addPackage)
 
-    val fallbackApps = loadInstalledPackages(context)
+    val fallbackApps = loadInstalledPackages()
     fallbackApps.forEach(::addPackage)
 
     return combined.values.toList()
   }
 
-  private fun loadInstalledPackages(context: Context): List<PackageInformation> {
+  fun readErrorLogs(): String {
+    return try {
+      val process = Runtime.getRuntime().exec("logcat -d *:E")
+      process.inputStream.bufferedReader().use { it.readText() }
+    } catch (e: Exception) {
+      Log.e(SETTINGS_TAG, "Error reading logs", e)
+      ""
+    }
+  }
+
+  private fun loadInstalledPackages(): List<PackageInformation> {
     val packageManager = context.packageManager ?: return emptyList()
     val installedPackages: List<PackageInfo> = try {
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -848,124 +288,661 @@ class Settings(val context: Context, private val preferences: SharedPreferences)
 
     return packages
   }
+}
 
-  @Composable
-  fun TestOptionsDialog(onDismiss: () -> Unit) {
-    var link by remember {
-      mutableStateOf(
-        TextFieldValue(
-          preferences.getString(TEST_LINK_KEY, TEST_LINK_DEFAULT)!!
-        )
-      )
-    }
-    var timeout by remember {
-      mutableStateOf(
-        TextFieldValue(
-          preferences.getLong(TIMEOUT_KEY, TIMEOUT_DEFAULT).toString()
-        )
-      )
-    }
-    val context = LocalContext.current
-    val localSoftwareKeyboardController = LocalSoftwareKeyboardController.current
-    val dialogKeyboardActions =
-      KeyboardActions(onDone = { localSoftwareKeyboardController?.hide() })
-    val dialogKeyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Done)
-    val dialogTextFieldModifier = Modifier
+@Composable
+fun SettingsScreen(repository: SettingsRepository) {
+  val context = LocalContext.current
+  val state = rememberLazyListState()
+  var encryptionDialogOpened by remember { mutableStateOf(false) }
+  var serverProxyDialogOpened by remember { mutableStateOf(false) }
+  var routingDialogOpened by remember { mutableStateOf(false) }
+  var testOptionsDialogOpened by remember { mutableStateOf(false) }
+  var logDialogOpened by remember { mutableStateOf(false) }
+
+  LazyColumn(
+    modifier = Modifier
       .fillMaxWidth()
-      .padding(8.dp)
+      .padding(0.dp),
+    state = state
+  ) {
+    item {
+      SettingsGroup(
+        modifier = Modifier,
+        title = { Text(context.getString(R.string.settings_group_vpn)) },
+        contentPadding = PaddingValues(8.dp),
+        enabled = true
+      ) {
+        SettingsMenuLink(
+          title = { Text(context.getString(R.string.encryption_settings)) },
+          subtitle = { Text(context.getString(R.string.encryption_settings_subtitle)) }
+        ) {
+          encryptionDialogOpened = true
+        }
 
-    AlertDialog(
-      onDismissRequest = onDismiss,
-      title = {
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-          Text(
-            text = context.getString(R.string.test_options),
+        SettingsMenuLink(
+          title = { Text(context.getString(R.string.server_proxy_settings)) },
+          subtitle = { Text(context.getString(R.string.server_proxy_settings_subtitle)) }
+        ) {
+          serverProxyDialogOpened = true
+        }
+
+        SettingsMenuLink(
+          title = { Text(context.getString(R.string.routing_settings)) },
+          subtitle = { Text(context.getString(R.string.routing_settings_subtitle)) }
+        ) {
+          routingDialogOpened = true
+        }
+      }
+
+      SettingsGroup(
+        modifier = Modifier,
+        title = { Text(context.getString(R.string.settings_group_other)) },
+        contentPadding = PaddingValues(8.dp),
+        enabled = true
+      ) {
+        SettingsMenuLink(
+          title = { Text(context.getString(R.string.test_options)) },
+          subtitle = { Text(context.getString(R.string.test_options_subtitle)) }
+        ) {
+          testOptionsDialogOpened = true
+        }
+
+        SettingsMenuLink(
+          title = { Text(context.getString(R.string.show_logs)) },
+        ) {
+          logDialogOpened = true
+        }
+      }
+
+      if (encryptionDialogOpened) {
+        EncryptionDialog(repository) { encryptionDialogOpened = false }
+      }
+      if (serverProxyDialogOpened) {
+        ServerProxyDialog(repository) { serverProxyDialogOpened = false }
+      }
+      if (routingDialogOpened) {
+        RoutingDialog(repository) { routingDialogOpened = false }
+      }
+      if (testOptionsDialogOpened) {
+        TestOptionsDialog(repository) { testOptionsDialogOpened = false }
+      }
+      if (logDialogOpened) {
+        LogDialog(repository) { logDialogOpened = false }
+      }
+    }
+  }
+}
+
+private fun parseFlexibleInt(context: Context, text: String): Int {
+  val value = text.trim()
+  if (value.isEmpty()) {
+    throw IllegalArgumentException(context.getString(R.string.toast_encryption_empty))
+  }
+  return if (value.startsWith("0x", ignoreCase = true)) {
+    value.substring(2).toLong(16).toInt()
+  } else {
+    value.toInt()
+  }
+}
+
+private fun formatAsHex(value: Int): String {
+  return String.format("0x%08X", value)
+}
+
+@Composable
+private fun EncryptionDialog(repository: SettingsRepository, onDismiss: () -> Unit) {
+  val current = remember { repository.readEncryptionPreferences() }
+  var kf by remember { mutableStateOf(TextFieldValue(formatAsHex(current.kf))) }
+  var kx by remember { mutableStateOf(TextFieldValue(formatAsHex(current.kx))) }
+  var kl by remember { mutableStateOf(TextFieldValue(formatAsHex(current.kl))) }
+  var kh by remember { mutableStateOf(TextFieldValue(formatAsHex(current.kh))) }
+  var protocol by remember { mutableStateOf(TextFieldValue(current.protocol)) }
+  var protocolKey by remember { mutableStateOf(TextFieldValue(current.protocolKey)) }
+  var transport by remember { mutableStateOf(TextFieldValue(current.transport)) }
+  var transportKey by remember { mutableStateOf(TextFieldValue(current.transportKey)) }
+  val context = LocalContext.current
+  val keyboardController = LocalSoftwareKeyboardController.current
+  val keyboardActions = KeyboardActions(onDone = { keyboardController?.hide() })
+  val lazyListState = rememberLazyListState()
+
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    title = {
+      Text(
+        text = context.getString(R.string.encryption_dialog_title),
+        fontSize = 22.sp
+      )
+    },
+    text = {
+      LazyColumn(state = lazyListState, contentPadding = PaddingValues(4.dp)) {
+        item {
+          OutlinedTextField(
             modifier = Modifier
-              .weight(1f)
-              .padding(end = 8.dp),
-            fontSize = 22.sp
+              .fillMaxWidth()
+              .padding(8.dp),
+            value = kf,
+            onValueChange = { kf = it },
+            label = { Text(context.getString(R.string.encryption_kf)) },
+            keyboardOptions = KeyboardOptions(
+              imeAction = ImeAction.Next,
+              keyboardType = KeyboardType.Ascii
+            ),
+            keyboardActions = keyboardActions
           )
         }
-      },
-      text = {
-        val lazyListState = rememberLazyListState()
-        LazyColumn(state = lazyListState, contentPadding = PaddingValues(4.dp)) {
-          item {
-            OutlinedTextField(
-              modifier = dialogTextFieldModifier,
-              value = link,
-              onValueChange = { link = it },
-              label = { Text(context.getString(R.string.test_link)) },
-              keyboardOptions = dialogKeyboardOptions,
-              keyboardActions = dialogKeyboardActions
-            )
-          }
-          item {
-            OutlinedTextField(
-              modifier = dialogTextFieldModifier,
-              value = timeout,
-              onValueChange = { timeout = it },
-              label = { Text(context.getString(R.string.test_timeout)) },
-              keyboardOptions = dialogKeyboardOptions,
-              keyboardActions = dialogKeyboardActions
-            )
-          }
+        item {
+          OutlinedTextField(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(8.dp),
+            value = kx,
+            onValueChange = { kx = it },
+            label = { Text(context.getString(R.string.encryption_kx)) },
+            keyboardOptions = KeyboardOptions(
+              imeAction = ImeAction.Next,
+              keyboardType = KeyboardType.Ascii
+            ),
+            keyboardActions = keyboardActions
+          )
         }
-      },
-      confirmButton = {
-        Button(
-          onClick = {
-            try {
-              preferences.edit().putString(TEST_LINK_KEY, link.text.trim()).apply()
-              preferences.edit().putInt(TIMEOUT_KEY, timeout.text.trim().toInt()).apply()
-              onDismiss()
-            } catch (e: Exception) {
-              Toast.makeText(context, e.message, Toast.LENGTH_SHORT).show()
-            }
-          }
-        ) {
-          Text(context.getString(R.string.save))
+        item {
+          OutlinedTextField(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(8.dp),
+            value = kl,
+            onValueChange = { kl = it },
+            label = { Text(context.getString(R.string.encryption_kl)) },
+            keyboardOptions = KeyboardOptions(
+              imeAction = ImeAction.Next,
+              keyboardType = KeyboardType.Ascii
+            ),
+            keyboardActions = keyboardActions
+          )
         }
-      },
-      dismissButton = {
-        Button(
-          onClick = onDismiss
-        ) {
-          Text(context.getString(R.string.cancel))
+        item {
+          OutlinedTextField(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(8.dp),
+            value = kh,
+            onValueChange = { kh = it },
+            label = { Text(context.getString(R.string.encryption_kh)) },
+            keyboardOptions = KeyboardOptions(
+              imeAction = ImeAction.Next,
+              keyboardType = KeyboardType.Ascii
+            ),
+            keyboardActions = keyboardActions
+          )
+        }
+        item {
+          OutlinedTextField(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(8.dp),
+            value = protocol,
+            onValueChange = { protocol = it },
+            label = { Text(context.getString(R.string.encryption_protocol)) },
+            keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Next),
+            keyboardActions = keyboardActions
+          )
+        }
+        item {
+          OutlinedTextField(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(8.dp),
+            value = protocolKey,
+            onValueChange = { protocolKey = it },
+            label = { Text(context.getString(R.string.encryption_protocol_key)) },
+            keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Next),
+            keyboardActions = keyboardActions
+          )
+        }
+        item {
+          OutlinedTextField(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(8.dp),
+            value = transport,
+            onValueChange = { transport = it },
+            label = { Text(context.getString(R.string.encryption_transport)) },
+            keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Next),
+            keyboardActions = keyboardActions
+          )
+        }
+        item {
+          OutlinedTextField(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(8.dp),
+            value = transportKey,
+            onValueChange = { transportKey = it },
+            label = { Text(context.getString(R.string.encryption_transport_key)) },
+            keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Done),
+            keyboardActions = keyboardActions
+          )
         }
       }
-    )
+    },
+    confirmButton = {
+      Button(
+        onClick = {
+          try {
+            repository.persistEncryptionPreferences(
+              EncryptionPreferences(
+                kf = parseFlexibleInt(context, kf.text),
+                kx = parseFlexibleInt(context, kx.text),
+                kl = parseFlexibleInt(context, kl.text),
+                kh = parseFlexibleInt(context, kh.text),
+                protocol = protocol.text.trim(),
+                protocolKey = protocolKey.text.trim(),
+                transport = transport.text.trim(),
+                transportKey = transportKey.text.trim(),
+              )
+            )
+            Toast.makeText(context, context.getString(R.string.toast_saved_success), Toast.LENGTH_SHORT).show()
+            onDismiss()
+          } catch (e: NumberFormatException) {
+            Toast.makeText(context, context.getString(R.string.toast_encryption_invalid_number), Toast.LENGTH_SHORT).show()
+          } catch (e: IllegalArgumentException) {
+            Toast.makeText(context, e.message, Toast.LENGTH_SHORT).show()
+          }
+        }
+      ) {
+        Text(context.getString(R.string.save))
+      }
+    },
+    dismissButton = {
+      Button(onClick = onDismiss) {
+        Text(context.getString(R.string.cancel))
+      }
+    }
+  )
+}
+
+@Composable
+private fun ServerProxyDialog(repository: SettingsRepository, onDismiss: () -> Unit) {
+  val context = LocalContext.current
+  var value by remember { mutableStateOf(TextFieldValue(repository.readServerProxy())) }
+  val keyboardController = LocalSoftwareKeyboardController.current
+  val keyboardActions = KeyboardActions(onDone = { keyboardController?.hide() })
+
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    title = {
+      Text(
+        text = context.getString(R.string.server_proxy_dialog_title),
+        fontSize = 22.sp
+      )
+    },
+    text = {
+      OutlinedTextField(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(8.dp),
+        value = value,
+        onValueChange = { value = it },
+        label = { Text(context.getString(R.string.server_proxy_label)) },
+        placeholder = { Text(context.getString(R.string.server_proxy_placeholder)) },
+        keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Done),
+        keyboardActions = keyboardActions
+      )
+    },
+    confirmButton = {
+      Button(
+        onClick = {
+          repository.persistServerProxy(value.text.trim())
+          Toast.makeText(context, context.getString(R.string.toast_saved_success), Toast.LENGTH_SHORT).show()
+          onDismiss()
+        }
+      ) {
+        Text(context.getString(R.string.save))
+      }
+    },
+    dismissButton = {
+      Button(onClick = onDismiss) {
+        Text(context.getString(R.string.cancel))
+      }
+    }
+  )
+}
+
+@Composable
+private fun RoutingDialog(repository: SettingsRepository, onDismiss: () -> Unit) {
+  val context = LocalContext.current
+  val initialPreferences = remember { repository.readRoutingPreferences() }
+  var mode by remember { mutableStateOf(initialPreferences.mode) }
+  var whitelist by remember { mutableStateOf(initialPreferences.whitelist) }
+  var blacklist by remember { mutableStateOf(initialPreferences.blacklist) }
+  var apps by remember { mutableStateOf(listOf<PackageInformation>()) }
+  var loadingApps by remember { mutableStateOf(true) }
+  var fullTunnel by remember { mutableStateOf(initialPreferences.fullTunnel) }
+
+  LaunchedEffect(Unit) {
+    loadingApps = true
+    val loadedApps = withContext(Dispatchers.IO) {
+      repository.queryRoutingPackages()
+    }
+    apps = loadedApps.sortedBy { (it.applicationName ?: it.packageName ?: "").lowercase() }
+    loadingApps = false
   }
 
-  @Composable
-  fun LogDialog(onDismiss: () -> Unit) {
-    var logLines by remember { mutableStateOf("") }
-    val scrollState = rememberScrollState()
-
-    Dialog(onDismissRequest = { onDismiss() }) {
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    title = {
+      Text(
+        text = context.getString(R.string.routing_dialog_title),
+        fontSize = 22.sp
+      )
+    },
+    text = {
       Column(
-        modifier = Modifier
-          .padding(8.dp)
-          .fillMaxSize()
-          .verticalScroll(scrollState)
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
       ) {
-        SelectionContainer { Text(text = logLines) }
+        RoutingMode.values().forEach { option ->
+          val labelRes = when (option) {
+            RoutingMode.GLOBAL -> R.string.routing_mode_global
+            RoutingMode.WHITELIST -> R.string.routing_mode_whitelist
+            RoutingMode.BLACKLIST -> R.string.routing_mode_blacklist
+          }
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(vertical = 4.dp)
+              .clickable {
+                mode = option
+                if (option != RoutingMode.GLOBAL) {
+                  fullTunnel = false
+                }
+              },
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            RadioButton(
+              selected = mode == option,
+              onClick = {
+                mode = option
+                if (option != RoutingMode.GLOBAL) {
+                  fullTunnel = false
+                }
+              }
+            )
+            Text(
+              text = context.getString(labelRes),
+              modifier = Modifier
+                .padding(start = 8.dp)
+                .weight(1f)
+            )
+          }
+        }
 
-        LaunchedEffect(Unit) {
-          try {
-            val process = Runtime.getRuntime().exec("logcat -d *:E")
-            val bufferedReader = process.inputStream.bufferedReader()
-            while (true) {
-              val line = bufferedReader.readLine() ?: break
-              logLines += "$line\n"
-              scrollState.scrollTo(scrollState.maxValue)
+        when (mode) {
+          RoutingMode.GLOBAL -> {
+            Row(
+              modifier = Modifier
+                .fillMaxWidth(),
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Checkbox(
+                checked = fullTunnel,
+                onCheckedChange = { checked -> fullTunnel = checked }
+              )
+              Column(modifier = Modifier.padding(start = 8.dp)) {
+                Text(text = context.getString(R.string.routing_full_tunnel_label))
+                Text(
+                  text = context.getString(R.string.routing_full_tunnel_description),
+                  fontSize = 12.sp,
+                  color = Color.Gray
+                )
+              }
             }
-            bufferedReader.close()
-          } catch (e: Exception) {
-            Log.e("LogActivity", "Error reading logs", e)
+            val hintRes = if (fullTunnel) {
+              R.string.routing_full_tunnel_hint_enabled
+            } else {
+              R.string.routing_mode_global_hint
+            }
+            Text(text = context.getString(hintRes))
+          }
+
+          RoutingMode.WHITELIST, RoutingMode.BLACKLIST -> {
+            val hintRes = if (mode == RoutingMode.WHITELIST) {
+              R.string.routing_app_list_whitelist
+            } else {
+              R.string.routing_app_list_blacklist
+            }
+            Text(
+              text = context.getString(hintRes),
+              fontWeight = FontWeight.Medium
+            )
+            if (loadingApps) {
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center
+              ) {
+                CircularProgressIndicator()
+              }
+            } else if (apps.isEmpty()) {
+              Text(text = context.getString(R.string.routing_empty_apps))
+            } else {
+              LazyColumn(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .heightIn(max = 360.dp)
+              ) {
+                items(apps) { app ->
+                  val packageName = app.packageName ?: return@items
+                  val isChecked = when (mode) {
+                    RoutingMode.WHITELIST -> whitelist.contains(packageName)
+                    RoutingMode.BLACKLIST -> blacklist.contains(packageName)
+                    else -> false
+                  }
+                  Row(
+                    modifier = Modifier
+                      .fillMaxWidth()
+                      .padding(vertical = 8.dp)
+                      .clickable {
+                        val next = !isChecked
+                        when (mode) {
+                          RoutingMode.WHITELIST -> {
+                            whitelist = whitelist.toMutableSet().also {
+                              if (next) {
+                                it.add(packageName)
+                              } else {
+                                it.remove(packageName)
+                              }
+                            }
+                          }
+
+                          RoutingMode.BLACKLIST -> {
+                            blacklist = blacklist.toMutableSet().also {
+                              if (next) {
+                                it.add(packageName)
+                              } else {
+                                it.remove(packageName)
+                              }
+                            }
+                          }
+
+                          else -> {}
+                        }
+                      },
+                    verticalAlignment = Alignment.CenterVertically
+                  ) {
+                    Checkbox(
+                      checked = isChecked,
+                      onCheckedChange = { checked ->
+                        when (mode) {
+                          RoutingMode.WHITELIST -> {
+                            whitelist = whitelist.toMutableSet().also {
+                              if (checked) {
+                                it.add(packageName)
+                              } else {
+                                it.remove(packageName)
+                              }
+                            }
+                          }
+
+                          RoutingMode.BLACKLIST -> {
+                            blacklist = blacklist.toMutableSet().also {
+                              if (checked) {
+                                it.add(packageName)
+                              } else {
+                                it.remove(packageName)
+                              }
+                            }
+                          }
+
+                          else -> {}
+                        }
+                      }
+                    )
+                    Column(modifier = Modifier.padding(start = 8.dp)) {
+                      Text(
+                        text = app.applicationName ?: packageName,
+                        fontSize = 16.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                      )
+                      Text(
+                        text = packageName,
+                        fontSize = 12.sp,
+                        color = Color.Gray
+                      )
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
+    },
+    confirmButton = {
+      Button(
+        onClick = {
+          repository.persistRoutingPreferences(
+            RoutingPreferences(
+              mode = mode,
+              whitelist = whitelist,
+              blacklist = blacklist,
+              fullTunnel = if (mode == RoutingMode.GLOBAL) fullTunnel else false
+            )
+          )
+          Toast.makeText(context, context.getString(R.string.toast_saved_success), Toast.LENGTH_SHORT).show()
+          onDismiss()
+        }
+      ) {
+        Text(context.getString(R.string.save))
+      }
+    },
+    dismissButton = {
+      Button(onClick = onDismiss) {
+        Text(context.getString(R.string.cancel))
+      }
+    }
+  )
+}
+
+@Composable
+private fun TestOptionsDialog(repository: SettingsRepository, onDismiss: () -> Unit) {
+  val initial = remember { repository.readTestOptions() }
+  var link by remember { mutableStateOf(TextFieldValue(initial.link)) }
+  var timeout by remember { mutableStateOf(TextFieldValue(initial.timeoutMs.toString())) }
+  val context = LocalContext.current
+  val keyboardController = LocalSoftwareKeyboardController.current
+  val keyboardActions = KeyboardActions(onDone = { keyboardController?.hide() })
+  val lazyListState = rememberLazyListState()
+
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    title = {
+      Text(
+        text = context.getString(R.string.test_options),
+        fontSize = 22.sp
+      )
+    },
+    text = {
+      LazyColumn(state = lazyListState, contentPadding = PaddingValues(4.dp)) {
+        item {
+          OutlinedTextField(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(8.dp),
+            value = link,
+            onValueChange = { link = it },
+            label = { Text(context.getString(R.string.test_link)) },
+            keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Next),
+            keyboardActions = keyboardActions
+          )
+        }
+        item {
+          OutlinedTextField(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(8.dp),
+            value = timeout,
+            onValueChange = { timeout = it },
+            label = { Text(context.getString(R.string.test_timeout)) },
+            keyboardOptions = KeyboardOptions.Default.copy(
+              imeAction = ImeAction.Done,
+              keyboardType = KeyboardType.Number
+            ),
+            keyboardActions = keyboardActions
+          )
+        }
+      }
+    },
+    confirmButton = {
+      Button(
+        onClick = {
+          try {
+            val timeoutValue = timeout.text.trim().toLong()
+            repository.persistTestOptions(
+              TestOptions(
+                link = link.text.trim(),
+                timeoutMs = timeoutValue
+              )
+            )
+            Toast.makeText(context, context.getString(R.string.toast_saved_success), Toast.LENGTH_SHORT).show()
+            onDismiss()
+          } catch (e: NumberFormatException) {
+            Toast.makeText(context, e.message ?: "", Toast.LENGTH_SHORT).show()
+          }
+        }
+      ) {
+        Text(context.getString(R.string.save))
+      }
+    },
+    dismissButton = {
+      Button(onClick = onDismiss) {
+        Text(context.getString(R.string.cancel))
+      }
+    }
+  )
+}
+
+@Composable
+private fun LogDialog(repository: SettingsRepository, onDismiss: () -> Unit) {
+  var logLines by remember { mutableStateOf("") }
+  val scrollState = rememberScrollState()
+
+  LaunchedEffect(Unit) {
+    logLines = withContext(Dispatchers.IO) { repository.readErrorLogs() }
+    withContext(Dispatchers.Main) {
+      scrollState.scrollTo(scrollState.maxValue)
+    }
+  }
+
+  Dialog(onDismissRequest = { onDismiss() }) {
+    Column(
+      modifier = Modifier
+        .padding(8.dp)
+        .fillMaxSize()
+        .verticalScroll(scrollState)
+    ) {
+      SelectionContainer { Text(text = logLines) }
     }
   }
 }
