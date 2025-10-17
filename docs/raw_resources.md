@@ -12,9 +12,10 @@ consumed when building the VPN runtime configuration:
   `DNSRuleList`, supplying domain-based routing rules for the embedded DNS engine so DNS
   queries can follow the curated policy instead of relying on upstream discovery.
 
-Both files are read at connect time through `RawReader.readRawResource` in
-`MainActivity` (see the `BypassIpList` and `DNSRuleList` assignments). Keeping the data in
-`res/raw` allows Android's resource system to package the lists efficiently while making
-runtime access straightforward. Even when the "proxy all traffic" preference is enabled the
-domain rules continue to load so the embedded resolver can reuse the bundled policy instead
-of falling back to slower upstream discovery.
+Both files are now loaded through `SettingsRepository`, which caches the bundled content and
+checks for user overrides saved under the app's internal storage (`user_bypass_ip.txt` and
+`user_dns_rules.txt`). The settings screen exposes "Bypass IP list" and "Domain rules"
+entries that write those overrides, allowing the Android client to match the Linux build's
+ability to edit routing datasets. When an override is cleared the repository falls back to
+the packaged resources. Keeping the base data in `res/raw` lets Android package the lists
+efficiently while making runtime access straightforward.

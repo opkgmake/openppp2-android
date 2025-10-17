@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.util.Log
 import android.widget.Toast
+import androidx.annotation.StringRes
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -31,11 +33,13 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,9 +58,14 @@ import com.alorma.compose.settings.ui.SettingsGroup
 import com.alorma.compose.settings.ui.SettingsMenuLink
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import supersocksr.ppp.android.R
 import supersocksr.ppp.android.openppp2.PackageX
 import supersocksr.ppp.android.openppp2.i.PackageInformation
+import supersocksr.ppp.android.utils.RawReader
+import java.io.File
 import java.util.LinkedHashMap
+import kotlin.text.Charsets
+
 
 const val TEST_LINK_KEY = "test_link"
 const val TEST_LINK_DEFAULT = "http://cp.cloudflare.com"
@@ -76,6 +85,8 @@ const val ROUTING_MODE_KEY = "routing_mode"
 const val ROUTING_ALLOWED_PACKAGES_KEY = "routing_allowed_packages"
 const val ROUTING_DISALLOWED_PACKAGES_KEY = "routing_disallowed_packages"
 const val ROUTING_FULL_TUNNEL_KEY = "routing_full_tunnel"
+private const val BYPASS_OVERRIDE_FILE = "user_bypass_ip.txt"
+private const val DNS_OVERRIDE_FILE = "user_dns_rules.txt"
 
 const val DEFAULT_ENCRYPTION_KF = 0x09362737
 const val DEFAULT_ENCRYPTION_KX = 128
@@ -89,6 +100,11 @@ const val DEFAULT_SERVER_PROXY = ""
 const val DEFAULT_ROUTING_MODE = "global"
 
 private const val SETTINGS_TAG = "SettingsRepository"
+
+private enum class RuleCacheSource {
+  DEFAULT,
+  OVERRIDE,
+}
 
 enum class RoutingMode(val storageValue: String) {
   GLOBAL("global"),
@@ -126,6 +142,122 @@ data class TestOptions(
 )
 
 class SettingsRepository(private val context: Context, private val preferences: SharedPreferences) {
+  private val rawReader = RawReader(context.resources)
+  private var cachedBypassIpRules: String? = null
+  private var cachedDnsRules: String? = null
+  private var bypassSource: RuleCacheSource = RuleCacheSource.DEFAULT
+  private var dnsSource: RuleCacheSource = RuleCacheSource.DEFAULT
+  private var defaultBypassIpRules: String? = null
+  private var defaultDnsRules: String? = null
+
+  private fun readOverrideFile(fileName: String): String? {
+    val target = File(context.filesDir, fileName)
+    if (!target.exists()) {
+      return null
+    }
+    return try {
+      target.readText(Charsets.UTF_8)
+    } catch (error: Exception) {
+      Log.e(SETTINGS_TAG, "Failed to read override $fileName", error)
+      null
+    }
+  }
+
+  private fun writeOverrideFile(fileName: String, contents: String) {
+    try {
+      context.openFileOutput(fileName, Context.MODE_PRIVATE).use { output ->
+        output.write(contents.toByteArray(Charsets.UTF_8))
+      }
+    } catch (error: Exception) {
+      Log.e(SETTINGS_TAG, "Failed to write override $fileName", error)
+      throw error
+    }
+  }
+
+  private fun deleteOverrideFile(fileName: String) {
+    val target = File(context.filesDir, fileName)
+    if (target.exists() && !target.delete()) {
+      Log.w(SETTINGS_TAG, "Unable to delete override file $fileName")
+    }
+  }
+
+  private fun loadDefaultBypassRulesInternal(): String {
+    val existing = defaultBypassIpRules
+    if (existing != null) {
+      return existing
+    }
+    val loaded = rawReader.readRawResource(R.raw.ip)
+    defaultBypassIpRules = loaded
+    return loaded
+  }
+
+  private fun loadDefaultDnsRulesInternal(): String {
+    val existing = defaultDnsRules
+    if (existing != null) {
+      return existing
+    }
+    val loaded = rawReader.readRawResource(R.raw.domain)
+    defaultDnsRules = loaded
+    return loaded
+  }
+
+  fun loadBypassIpRules(): String {
+    cachedBypassIpRules?.let { return it }
+    val override = readOverrideFile(BYPASS_OVERRIDE_FILE)
+    val rules = override ?: loadDefaultBypassRulesInternal()
+    cachedBypassIpRules = rules
+    bypassSource = if (override != null) RuleCacheSource.OVERRIDE else RuleCacheSource.DEFAULT
+    return rules
+  }
+
+  fun loadDnsRules(): String {
+    cachedDnsRules?.let { return it }
+    val override = readOverrideFile(DNS_OVERRIDE_FILE)
+    val rules = override ?: loadDefaultDnsRulesInternal()
+    cachedDnsRules = rules
+    dnsSource = if (override != null) RuleCacheSource.OVERRIDE else RuleCacheSource.DEFAULT
+    return rules
+  }
+
+  fun loadDefaultBypassRules(): String {
+    return loadDefaultBypassRulesInternal()
+  }
+
+  fun loadDefaultDnsRules(): String {
+    return loadDefaultDnsRulesInternal()
+  }
+
+  fun persistBypassOverride(contents: String) {
+    writeOverrideFile(BYPASS_OVERRIDE_FILE, contents)
+    cachedBypassIpRules = contents
+    bypassSource = RuleCacheSource.OVERRIDE
+  }
+
+  fun persistDnsOverride(contents: String) {
+    writeOverrideFile(DNS_OVERRIDE_FILE, contents)
+    cachedDnsRules = contents
+    dnsSource = RuleCacheSource.OVERRIDE
+  }
+
+  fun clearBypassOverride() {
+    deleteOverrideFile(BYPASS_OVERRIDE_FILE)
+    cachedBypassIpRules = null
+    bypassSource = RuleCacheSource.DEFAULT
+  }
+
+  fun clearDnsOverride() {
+    deleteOverrideFile(DNS_OVERRIDE_FILE)
+    cachedDnsRules = null
+    dnsSource = RuleCacheSource.DEFAULT
+  }
+
+  fun hasBypassOverride(): Boolean {
+    return bypassSource == RuleCacheSource.OVERRIDE || readOverrideFile(BYPASS_OVERRIDE_FILE) != null
+  }
+
+  fun hasDnsOverride(): Boolean {
+    return dnsSource == RuleCacheSource.OVERRIDE || readOverrideFile(DNS_OVERRIDE_FILE) != null
+  }
   fun readEncryptionPreferences(): EncryptionPreferences {
     return EncryptionPreferences(
       kf = preferences.getInt(ENCRYPTION_KF_KEY, DEFAULT_ENCRYPTION_KF),
@@ -299,6 +431,8 @@ fun SettingsScreen(repository: SettingsRepository) {
   var routingDialogOpened by remember { mutableStateOf(false) }
   var testOptionsDialogOpened by remember { mutableStateOf(false) }
   var logDialogOpened by remember { mutableStateOf(false) }
+  var bypassRulesDialogOpened by remember { mutableStateOf(false) }
+  var dnsRulesDialogOpened by remember { mutableStateOf(false) }
 
   LazyColumn(
     modifier = Modifier
@@ -333,6 +467,20 @@ fun SettingsScreen(repository: SettingsRepository) {
         ) {
           routingDialogOpened = true
         }
+
+        SettingsMenuLink(
+          title = { Text(context.getString(R.string.edit_bypass_list)) },
+          subtitle = { Text(context.getString(R.string.edit_bypass_list_subtitle)) }
+        ) {
+          bypassRulesDialogOpened = true
+        }
+
+        SettingsMenuLink(
+          title = { Text(context.getString(R.string.edit_dns_rules)) },
+          subtitle = { Text(context.getString(R.string.edit_dns_rules_subtitle)) }
+        ) {
+          dnsRulesDialogOpened = true
+        }
       }
 
       SettingsGroup(
@@ -364,6 +512,20 @@ fun SettingsScreen(repository: SettingsRepository) {
       if (routingDialogOpened) {
         RoutingDialog(repository) { routingDialogOpened = false }
       }
+      if (bypassRulesDialogOpened) {
+        RuleEditorDialog(
+          repository = repository,
+          target = RuleEditorTarget.BYPASS,
+          onDismiss = { bypassRulesDialogOpened = false }
+        )
+      }
+      if (dnsRulesDialogOpened) {
+        RuleEditorDialog(
+          repository = repository,
+          target = RuleEditorTarget.DNS,
+          onDismiss = { dnsRulesDialogOpened = false }
+        )
+      }
       if (testOptionsDialogOpened) {
         TestOptionsDialog(repository) { testOptionsDialogOpened = false }
       }
@@ -372,6 +534,181 @@ fun SettingsScreen(repository: SettingsRepository) {
       }
     }
   }
+}
+
+private enum class RuleEditorTarget(@StringRes val titleRes: Int, @StringRes val hintRes: Int) {
+  BYPASS(R.string.rule_editor_bypass_title, R.string.rule_editor_bypass_hint),
+  DNS(R.string.rule_editor_dns_title, R.string.rule_editor_dns_hint);
+}
+
+@Composable
+private fun RuleEditorDialog(
+  repository: SettingsRepository,
+  target: RuleEditorTarget,
+  onDismiss: () -> Unit,
+) {
+  val context = LocalContext.current
+  val scope = rememberCoroutineScope()
+  var fieldValue by remember { mutableStateOf(TextFieldValue("")) }
+  var working by remember { mutableStateOf(true) }
+  var hasOverride by remember { mutableStateOf(false) }
+
+  LaunchedEffect(target) {
+    val (contents, override) = withContext(Dispatchers.IO) {
+      when (target) {
+        RuleEditorTarget.BYPASS -> repository.loadBypassIpRules() to repository.hasBypassOverride()
+        RuleEditorTarget.DNS -> repository.loadDnsRules() to repository.hasDnsOverride()
+      }
+    }
+    fieldValue = TextFieldValue(contents)
+    hasOverride = override
+    working = false
+  }
+
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    title = {
+      Text(
+        text = context.getString(target.titleRes),
+        fontSize = 22.sp,
+      )
+    },
+    text = {
+      if (working) {
+        Column(
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 16.dp),
+          horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+          CircularProgressIndicator()
+          Spacer(modifier = Modifier.height(12.dp))
+          Text(text = context.getString(R.string.rule_editor_loading))
+        }
+      } else {
+        Column(
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 8.dp),
+          verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+          Text(
+            text = context.getString(target.hintRes),
+            fontSize = 14.sp,
+            color = Color.Gray,
+          )
+          OutlinedTextField(
+            modifier = Modifier
+              .fillMaxWidth()
+              .heightIn(min = 200.dp),
+            value = fieldValue,
+            onValueChange = { fieldValue = it },
+            singleLine = false,
+            maxLines = Int.MAX_VALUE,
+            keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Default),
+          )
+          Text(
+            text = if (hasOverride) {
+              context.getString(R.string.rule_editor_status_custom)
+            } else {
+              context.getString(R.string.rule_editor_status_default)
+            },
+            fontSize = 13.sp,
+            color = if (hasOverride) Color(0xFF00695C) else Color.Gray,
+          )
+        }
+      }
+    },
+    confirmButton = {
+      Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        TextButton(
+          onClick = {
+            scope.launch {
+              working = true
+              try {
+                val defaultContents = withContext(Dispatchers.IO) {
+                  when (target) {
+                    RuleEditorTarget.BYPASS -> {
+                      repository.clearBypassOverride()
+                      repository.loadDefaultBypassRules()
+                    }
+
+                    RuleEditorTarget.DNS -> {
+                      repository.clearDnsOverride()
+                      repository.loadDefaultDnsRules()
+                    }
+                  }
+                }
+                fieldValue = TextFieldValue(defaultContents)
+                hasOverride = false
+                Toast.makeText(
+                  context,
+                  context.getString(R.string.rule_editor_reset_success),
+                  Toast.LENGTH_SHORT,
+                ).show()
+              } catch (error: Exception) {
+                Log.e(SETTINGS_TAG, "Failed to reset rules", error)
+                Toast.makeText(
+                  context,
+                  context.getString(
+                    R.string.rule_editor_reset_failed,
+                    error.localizedMessage ?: error.toString(),
+                  ),
+                  Toast.LENGTH_LONG,
+                ).show()
+              } finally {
+                working = false
+              }
+            }
+          },
+          enabled = !working,
+        ) {
+          Text(context.getString(R.string.rule_editor_reset))
+        }
+        Button(
+          onClick = {
+            scope.launch {
+              working = true
+              try {
+                withContext(Dispatchers.IO) {
+                  when (target) {
+                    RuleEditorTarget.BYPASS -> repository.persistBypassOverride(fieldValue.text)
+                    RuleEditorTarget.DNS -> repository.persistDnsOverride(fieldValue.text)
+                  }
+                }
+                hasOverride = true
+                Toast.makeText(
+                  context,
+                  context.getString(R.string.toast_saved_success),
+                  Toast.LENGTH_SHORT,
+                ).show()
+                onDismiss()
+              } catch (error: Exception) {
+                Log.e(SETTINGS_TAG, "Failed to save rules", error)
+                Toast.makeText(
+                  context,
+                  context.getString(
+                    R.string.rule_editor_save_failed,
+                    error.localizedMessage ?: error.toString(),
+                  ),
+                  Toast.LENGTH_LONG,
+                ).show()
+                working = false
+              }
+            }
+          },
+          enabled = !working,
+        ) {
+          Text(context.getString(R.string.save))
+        }
+      }
+    },
+    dismissButton = {
+      TextButton(onClick = onDismiss, enabled = !working) {
+        Text(context.getString(R.string.cancel))
+      }
+    },
+  )
 }
 
 private fun parseFlexibleInt(context: Context, text: String): Int {

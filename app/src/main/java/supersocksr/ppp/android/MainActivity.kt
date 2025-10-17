@@ -90,7 +90,6 @@ import supersocksr.ppp.android.openppp2.VPNLinkConfiguration
 import supersocksr.ppp.android.ui.theme.Openppp2Theme
 import supersocksr.ppp.android.ui.theme.Pink500
 import supersocksr.ppp.android.utils.Address
-import supersocksr.ppp.android.utils.RawReader
 import supersocksr.ppp.android.utils.UserConfig
 import java.net.ConnectException
 import java.net.SocketTimeoutException
@@ -122,8 +121,6 @@ class MainActivity : PppVpnActivity() {
   private var vpnRunning by mutableStateOf(false)
   private val defaultPrimaryDns = "8.8.8.8"
   private val defaultSecondaryDns = "8.8.4.4"
-  private var cachedBypassIpRules: String? = null
-  private var cachedDnsRules: String? = null
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
@@ -228,14 +225,8 @@ class MainActivity : PppVpnActivity() {
     val encryptionPreferences = settingsRepository.readEncryptionPreferences()
     val serverProxy = settingsRepository.readServerProxy()
     val routingPreferences = settingsRepository.readRoutingPreferences()
-    val rawReader = RawReader(resources)
-    val bypassIpRules = cachedBypassIpRules ?: rawReader
-      .readRawResource(R.raw.ip)
-      .also { cachedBypassIpRules = it }
-    val rawDnsRules = cachedDnsRules ?: rawReader
-      .readRawResource(R.raw.domain)
-      .also { cachedDnsRules = it }
-    val effectiveDnsRules = rawDnsRules
+    val bypassIpRules = settingsRepository.loadBypassIpRules()
+    val effectiveDnsRules = settingsRepository.loadDnsRules()
 
     val config = VPNLinkConfiguration().apply {
       SubnetAddress = "255.255.255.0"

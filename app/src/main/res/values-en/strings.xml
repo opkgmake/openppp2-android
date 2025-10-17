@@ -58,6 +58,22 @@
     <string name="routing_full_tunnel_description">Ignore the built-in direct IP and domain lists so every request stays in the VPN tunnel.</string>
     <string name="routing_full_tunnel_hint_enabled">All-traffic proxy is enabled. Built-in bypass lists will be ignored.</string>
 
+    <string name="edit_bypass_list">Bypass IP list</string>
+    <string name="edit_bypass_list_subtitle">Override or customize ip.txt</string>
+    <string name="edit_dns_rules">Domain rules</string>
+    <string name="edit_dns_rules_subtitle">Override or customize domain.txt</string>
+    <string name="rule_editor_bypass_title">Edit bypass IP list</string>
+    <string name="rule_editor_dns_title">Edit domain rules</string>
+    <string name="rule_editor_bypass_hint">One CIDR or IP per line; leave empty to disable bypass entries.</string>
+    <string name="rule_editor_dns_hint">One domain rule per line using domain[TAB]/DNS/source format.</string>
+    <string name="rule_editor_loading">Loading rules…</string>
+    <string name="rule_editor_status_custom">Using custom rules.</string>
+    <string name="rule_editor_status_default">Using bundled rules.</string>
+    <string name="rule_editor_reset">Restore default</string>
+    <string name="rule_editor_reset_success">Restored bundled rules.</string>
+    <string name="rule_editor_reset_failed">Failed to restore default: %1$s</string>
+    <string name="rule_editor_save_failed">Failed to save rules: %1$s</string>
+
     <string name="vpn_test">Test</string>
     <string name="vpn_testing">Testing...</string>
     <string name="test_result_latency">%1$d ms</string>

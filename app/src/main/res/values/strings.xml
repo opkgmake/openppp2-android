@@ -58,6 +58,22 @@
     <string name="routing_full_tunnel_description">忽略内置的直连 IP 与域名列表，让所有流量都通过 VPN。</string>
     <string name="routing_full_tunnel_hint_enabled">已启用全部流量代理模式，直连名单将不会生效。</string>
 
+    <string name="edit_bypass_list">直连 IP 列表</string>
+    <string name="edit_bypass_list_subtitle">自定义或替换内置 ip.txt</string>
+    <string name="edit_dns_rules">域名规则列表</string>
+    <string name="edit_dns_rules_subtitle">自定义或替换内置 domain.txt</string>
+    <string name="rule_editor_bypass_title">编辑直连 IP 列表</string>
+    <string name="rule_editor_dns_title">编辑域名规则</string>
+    <string name="rule_editor_bypass_hint">每行一个 CIDR 或 IP；留空将不会配置直连名单。</string>
+    <string name="rule_editor_dns_hint">每行一条域名规则，格式：域名[TAB]/DNS 地址/来源。</string>
+    <string name="rule_editor_loading">正在加载规则…</string>
+    <string name="rule_editor_status_custom">当前使用自定义规则。</string>
+    <string name="rule_editor_status_default">当前使用内置规则。</string>
+    <string name="rule_editor_reset">恢复默认</string>
+    <string name="rule_editor_reset_success">已恢复默认规则。</string>
+    <string name="rule_editor_reset_failed">恢复默认失败：%1$s</string>
+    <string name="rule_editor_save_failed">保存规则失败：%1$s</string>
+
     <string name="vpn_test">测试</string>
     <string name="vpn_testing">测试中…</string>
     <string name="test_result_latency">%1$d 毫秒</string>
