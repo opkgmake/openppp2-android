@@ -10,9 +10,9 @@ consumed when building the VPN runtime configuration:
 - `domain.txt` – A newline-delimited domain rule set that associates host names with the
   resolver source `/223.5.5.5/nic`. During VPN configuration the file is read into
   `DNSRuleList`, supplying domain-based routing rules for the embedded DNS engine. When the
-  "force remote DNS" option is enabled with user-specified resolvers the app omits these
-  bundled rules so every lookup is delegated to the configured remote servers instead of the
-  curated dataset.
+  "Proxy all DNS lookups" toggle is enabled the app extracts the remote resolver addresses
+  from these rules and uses them for VPN DNS servers, ensuring every query is proxied unless
+  the dataset yields no candidates (in which case it falls back to the legacy defaults).
 
 Both files are read at connect time through `RawReader.readRawResource` in
 `MainActivity` (see the `BypassIpList` and `DNSRuleList` assignments). Keeping the data in

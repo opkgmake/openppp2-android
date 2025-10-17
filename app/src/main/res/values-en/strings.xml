@@ -17,8 +17,6 @@
     <string name="config_guid">GUID</string>
     <string name="config_static">Static Server Address</string>
     <string name="config_tun">Tun Address</string>
-    <string name="config_dns_primary">Primary DNS</string>
-    <string name="config_dns_secondary">Secondary DNS</string>
     <string name="warn_deserialize">Deserialization failed, clear all configs.</string>
     <string name="warn_config_not_select">Please select a config first.</string>
 
@@ -59,8 +57,8 @@
     <string name="routing_full_tunnel_label">Proxy all traffic</string>
     <string name="routing_full_tunnel_description">Ignore the built-in direct IP and domain lists so every request stays in the VPN tunnel.</string>
     <string name="routing_full_tunnel_hint_enabled">All-traffic proxy is enabled. Built-in bypass lists will be ignored.</string>
-    <string name="routing_force_remote_dns_label">Force remote DNS</string>
-    <string name="routing_force_remote_dns_description">Skip the default system resolvers and prefer the configured or rule-based servers to avoid leaking to 8.8.8.8.</string>
+    <string name="routing_force_remote_dns_label">Proxy all DNS lookups</string>
+    <string name="routing_force_remote_dns_description">Resolve every domain through the remote servers instead of the system defaults to prevent leaks.</string>
 
     <string name="vpn_test">Test</string>
     <string name="vpn_testing">Testing...</string>

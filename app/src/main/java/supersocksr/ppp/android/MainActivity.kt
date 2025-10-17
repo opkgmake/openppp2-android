@@ -73,6 +73,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -105,6 +107,10 @@ class MainActivity : PppVpnActivity() {
   private val dnsAddressPattern = Regex("/(\\d{1,3}(?:\\.\\d{1,3}){3})/")
   private val defaultPrimaryDns = "8.8.8.8"
   private val defaultSecondaryDns = "8.8.4.4"
+  private val userConfigJson = Json {
+    ignoreUnknownKeys = true
+    encodeDefaults = true
+  }
   private var cachedBypassIpRules: String? = null
   private var cachedDnsRules: String? = null
 
@@ -133,8 +139,7 @@ class MainActivity : PppVpnActivity() {
     val rawDnsRules = cachedDnsRules ?: rawReader
       .readRawResource(R.raw.domain)
       .also { cachedDnsRules = it }
-    var effectiveDnsRules = rawDnsRules
-    val userRemoteDnsServers = linkedSetOf<String>()
+    val effectiveDnsRules = rawDnsRules
     var usedRuleDerivedServers = false
 
     val config = VPNLinkConfiguration().apply {
@@ -151,46 +156,24 @@ class MainActivity : PppVpnActivity() {
       AtomicHttpProxySet = false
       DnsAddresses.apply {
         clear()
-        val primaryDns = selectedUserConfig.value!!.dns1.trim()
-        val secondaryDns = selectedUserConfig.value!!.dns2.trim()
         val dnsServers = linkedSetOf<String>()
-        val shouldIgnorePrimaryDefault =
-          routingPreferences.forceRemoteDns && primaryDns == defaultPrimaryDns
-        val shouldIgnoreSecondaryDefault =
-          routingPreferences.forceRemoteDns && secondaryDns == defaultSecondaryDns
-        if (primaryDns.isNotEmpty() && !shouldIgnorePrimaryDefault) {
-          dnsServers.add(primaryDns)
-          if (routingPreferences.forceRemoteDns && primaryDns != defaultPrimaryDns) {
-            userRemoteDnsServers.add(primaryDns)
-          }
-        }
-        if (secondaryDns.isNotEmpty() && !shouldIgnoreSecondaryDefault) {
-          dnsServers.add(secondaryDns)
-          if (routingPreferences.forceRemoteDns && secondaryDns != defaultSecondaryDns) {
-            userRemoteDnsServers.add(secondaryDns)
-          }
-        }
-        if (routingPreferences.forceRemoteDns && dnsServers.isEmpty()) {
+        if (routingPreferences.forceRemoteDns) {
           val fallbackServers = extractDnsServersFromRules(rawDnsRules)
           if (fallbackServers.isNotEmpty()) {
             usedRuleDerivedServers = true
             dnsServers.addAll(fallbackServers)
+          } else {
+            Log.w(TAG, "forceRemoteDns enabled but no remote servers discovered; using legacy defaults")
           }
         }
         if (dnsServers.isEmpty()) {
-          if (routingPreferences.forceRemoteDns) {
-            Log.w(TAG, "forceRemoteDns enabled but no remote servers discovered; using legacy defaults")
-          }
           dnsServers.add(defaultPrimaryDns)
           dnsServers.add(defaultSecondaryDns)
         }
         dnsServers.forEach { add(it) }
       }
 
-      if (routingPreferences.forceRemoteDns && userRemoteDnsServers.isNotEmpty()) {
-        Log.d(TAG, "forceRemoteDns using user-defined servers $userRemoteDnsServers; clearing bundled DNS rules")
-        effectiveDnsRules = ""
-      } else if (routingPreferences.forceRemoteDns && usedRuleDerivedServers) {
+      if (routingPreferences.forceRemoteDns && usedRuleDerivedServers) {
         Log.i(TAG, "forceRemoteDns relying on bundled DNS rules for resolver selection")
       }
 
@@ -422,7 +405,7 @@ class MainActivity : PppVpnActivity() {
     val originalAllConfig = configPreferences.getString(ALL_CONFIGS_KEY, "[]")!!
       .let {
         try {
-          Json.decodeFromString(userConfigListSerializer, it)
+          userConfigJson.decodeFromString(userConfigListSerializer, it)
         } catch (e: Exception) {
           Toast.makeText(
             applicationContext,
@@ -450,7 +433,7 @@ class MainActivity : PppVpnActivity() {
       configPreferences.edit()
         .putString(
           ALL_CONFIGS_KEY,
-          Json.encodeToString(userConfigListSerializer, configListState)
+          userConfigJson.encodeToString(userConfigListSerializer, configListState)
         ).apply()
     }
 
@@ -626,9 +609,6 @@ class MainActivity : PppVpnActivity() {
         )
       )
     }
-    var dns1 by remember { mutableStateOf(TextFieldValue(config.dns1)) }
-    var dns2 by remember { mutableStateOf(TextFieldValue(config.dns2)) }
-
     val lazyListState = rememberLazyListState()
     val dialogKeyboardActions = KeyboardActions(onDone = {
       hideIME()
@@ -707,26 +687,6 @@ class MainActivity : PppVpnActivity() {
               keyboardActions = dialogKeyboardActions
             )
           }
-          item {
-            OutlinedTextField(
-              modifier = dialogTextFieldModifier,
-              value = dns1,
-              onValueChange = { dns1 = it },
-              label = { Text(getString(R.string.config_dns_primary)) },
-              keyboardOptions = dialogKeyboardOptions,
-              keyboardActions = dialogKeyboardActions
-            )
-          }
-          item {
-            OutlinedTextField(
-              modifier = dialogTextFieldModifier,
-              value = dns2,
-              onValueChange = { dns2 = it },
-              label = { Text(getString(R.string.config_dns_secondary)) },
-              keyboardOptions = dialogKeyboardOptions,
-              keyboardActions = dialogKeyboardActions
-            )
-          }
         }
       },
       confirmButton = {
@@ -741,8 +701,6 @@ class MainActivity : PppVpnActivity() {
                 guid = guid.text.trim(),
                 tun_address = tun_address.text.trim()
                   .let { if (it.isBlank()) null else Address.parse(it) },
-                dns1 = dns1.text.trim(),
-                dns2 = dns2.text.trim(),
               )
               cfg.validate()
               onSave(cfg)
