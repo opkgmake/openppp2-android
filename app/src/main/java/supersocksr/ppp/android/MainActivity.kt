@@ -10,6 +10,7 @@ import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -741,6 +742,8 @@ class MainActivity : PppVpnActivity() {
       .fillMaxWidth()
       .padding(8.dp)
 
+    val clearKeyboardInteractionSource = remember { MutableInteractionSource() }
+
     AlertDialog(
       onDismissRequest = onDismiss,
       title = {
@@ -755,7 +758,12 @@ class MainActivity : PppVpnActivity() {
           DeleteButton { onDelete() }
         }
       },
-      modifier = Modifier.clickable(interactionSource = null, indication = null) { hideIME() },
+      modifier = Modifier.clickable(
+        interactionSource = clearKeyboardInteractionSource,
+        indication = null
+      ) {
+        hideIME()
+      },
       text = {
         LazyColumn(state = lazyListState, contentPadding = PaddingValues(4.dp)) {
           item {
