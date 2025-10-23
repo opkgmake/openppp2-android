@@ -22,5 +22,10 @@ data class UserConfig(
     if (!static_server.hasPort()) {
       throw IllegalArgumentException("static_server port cannot be empty")
     }
+    tun_address?.let {
+      if (it.isIpv6Literal()) {
+        throw IllegalArgumentException("tun_address does not support IPv6")
+      }
+    }
   }
 }

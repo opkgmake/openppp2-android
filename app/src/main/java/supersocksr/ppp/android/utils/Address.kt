@@ -43,11 +43,40 @@ data class Address(
   override fun toString(): String {
     val sb = StringBuilder()
     if (scheme != null) sb.append("$scheme://")
-    if (host != null) sb.append(host)
+    if (host != null) {
+      if (host.contains(":") && additional_ip == null) {
+        sb.append("[").append(host).append("]")
+      } else {
+        sb.append(host)
+      }
+    }
     if (additional_ip != null) sb.append("[$additional_ip]")
     if (port != null) sb.append(":$port")
     if (path != null) sb.append(path)
     return sb.toString()
+  }
+
+  val displayHost: String?
+    get() = host ?: additional_ip
+
+  fun toVpnUrl(): String {
+    val sb = StringBuilder()
+    if (scheme != null) sb.append("$scheme://")
+    val effectiveHost = when {
+      host != null -> host
+      additional_ip != null && additional_ip.contains(":") -> "ipv6-" + additional_ip.replace(":", "-")
+      else -> null
+    }
+    if (!effectiveHost.isNullOrEmpty()) sb.append(effectiveHost)
+    if (additional_ip != null) sb.append("[$additional_ip]")
+    if (port != null) sb.append(":$port")
+    if (path != null) sb.append(path)
+    return sb.toString()
+  }
+
+  fun isIpv6Literal(): Boolean {
+    val candidate = additional_ip ?: host
+    return candidate?.contains(":") == true
   }
 
   fun debug() {

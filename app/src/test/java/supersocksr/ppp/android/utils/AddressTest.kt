@@ -2,6 +2,7 @@ package supersocksr.ppp.android.utils
 
 import org.junit.Test
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 
 class AddressTest {
 
@@ -10,6 +11,7 @@ class AddressTest {
     assertEquals("89.0.142.86", Address(null, "89.0.142.86").toString())
     assertEquals("https://89.0.142.86", Address("https", "89.0.142.86", null).toString())
     assertEquals("ppp://89.0.142.86:20000", Address("ppp", "89.0.142.86", port = 20000).toString())
+    assertEquals("ppp://89.0.142.86:20000", Address("ppp", "89.0.142.86", port = 20000).toVpnUrl())
     assertEquals(
       "ws://www.baidu.com[127.0.0.1]:899/tun",
       Address("ws", "www.baidu.com", "127.0.0.1", 899, "/tun").toString()
@@ -36,5 +38,14 @@ class AddressTest {
       Address("ws", "www.baidu.com", "127.0.0.1", null, "/tun"),
       Address.unsafeParse("ws://www.baidu.com[127.0.0.1]/tun")
     )
+  }
+
+  @Test
+  fun testIpv6Literal() {
+    val address = Address.unsafeParse("ppp://[2001:db8::1]:20000")
+    assertEquals("ppp://[2001:db8::1]:20000", address.toString())
+    assertEquals("2001:db8::1", address.displayHost)
+    assertEquals("ppp://ipv6-2001-db8--1[2001:db8::1]:20000", address.toVpnUrl())
+    assertTrue(address.isIpv6Literal())
   }
 }

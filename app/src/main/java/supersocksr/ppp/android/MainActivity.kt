@@ -180,7 +180,7 @@ class MainActivity : PppVpnActivity() {
             keep_alived[0] = 0
             keep_alived[1] = 0
             aggligator = 0
-            servers.add(selectedUserConfig.value!!.static_server.toString())
+            servers.add(selectedUserConfig.value!!.static_server.toVpnUrl())
             Log.d(TAG, "udp static servers: $servers")
           }
         }
@@ -208,7 +208,10 @@ class MainActivity : PppVpnActivity() {
         client.apply {
           guid = UUID.randomUUID().toString()
           Log.d(TAG, "client guid: $guid")
-          server = VPN.vpn_link_of(selectedUserConfig.value!!.server.toString())!!.url
+          val serverAddress = selectedUserConfig.value!!.server
+          val resolvedServerUrl = VPN.vpn_link_of(serverAddress.toVpnUrl())?.url
+            ?: serverAddress.toVpnUrl()
+          server = resolvedServerUrl
           Log.d(TAG, "client server: $server")
           bandwidth = 0
           reconnections.timeout = Macro.PPP_TCP_CONNECT_TIMEOUT
@@ -396,7 +399,7 @@ class MainActivity : PppVpnActivity() {
             contentAlignment = Alignment.Center
           ) {
             Text(
-              text = config.name.ifEmpty { config.server.host.orEmpty() },
+              text = config.name.ifEmpty { config.server.displayHost.orEmpty() },
               fontSize = 14.sp,
               color = MaterialTheme.colorScheme.onPrimary,
               overflow = TextOverflow.Ellipsis
