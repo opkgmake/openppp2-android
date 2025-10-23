@@ -12,14 +12,6 @@ data class Address(
 ) {
 
   companion object {
-    private val addressRegex = Regex(
-      "^(?:([a-zA-Z][a-zA-Z0-9+.-]*)://)?" +  // Group 1: scheme
-              "([^\\[\\]:/]+)?" +                 // Group 2: host
-              "(?:\\[([^]]+)])?" +                    // Group 3: ip
-              "(?::(\\d+))?" +                        // Group 4: port
-              "(/.*)?"                                // Group 5: path
-    )
-
     fun parse(input: String): Address? {
       return try {
         unsafeParse(input)
@@ -29,14 +21,61 @@ data class Address(
     }
 
     fun unsafeParse(input: String): Address {
-      val matchResult = addressRegex.matchEntire(input)
-        ?: throw IllegalArgumentException("address not match regex.")
-      val scheme = matchResult.groupValues.getOrNull(1)?.let { it.ifEmpty { null } }
-      val host = matchResult.groupValues.getOrNull(2)?.let { it.ifEmpty { null } }
-      val ip = matchResult.groupValues.getOrNull(3)?.let { it.ifEmpty { null } }
-      val port = matchResult.groupValues.getOrNull(4)?.let { it.ifEmpty { null } }
-      val path = matchResult.groupValues.getOrNull(5)?.let { it.ifEmpty { null } }
-      return Address(scheme, host, ip, port?.toInt(), path)
+      val trimmed = input.trim()
+      require(trimmed.isNotEmpty()) { "address cannot be empty" }
+
+      var scheme: String? = null
+      var remainder = trimmed
+      val schemeSeparator = remainder.indexOf("://")
+      if (schemeSeparator >= 0) {
+        scheme = remainder.substring(0, schemeSeparator).ifBlank { null }
+        remainder = remainder.substring(schemeSeparator + 3)
+      }
+
+      var path: String? = null
+      val slashIndex = remainder.indexOf('/')
+      if (slashIndex >= 0) {
+        path = remainder.substring(slashIndex).ifBlank { null }
+        remainder = remainder.substring(0, slashIndex)
+      }
+
+      var hostToken = remainder.trim()
+      var literalIp: String? = null
+
+      if (hostToken.contains('[')) {
+        val start = hostToken.indexOf('[')
+        val end = hostToken.indexOf(']', start + 1)
+        require(start >= 0 && end > start) { "invalid ipv6 literal" }
+        literalIp = hostToken.substring(start + 1, end)
+        hostToken = (hostToken.substring(0, start) + hostToken.substring(end + 1)).trim()
+      }
+
+      var host: String? = null
+      var port: Int? = null
+
+      if (hostToken.isNotEmpty()) {
+        val lastColon = hostToken.lastIndexOf(':')
+        if (lastColon > 0 && hostToken.substring(0, lastColon).indexOf(':') == -1) {
+          val hostPart = hostToken.substring(0, lastColon)
+          val portPart = hostToken.substring(lastColon + 1)
+          if (portPart.isNotEmpty()) {
+            port = portPart.toInt()
+          }
+          host = hostPart.ifBlank { null }
+        } else if (lastColon == 0) {
+          val portPart = hostToken.substring(1)
+          if (portPart.isNotEmpty()) {
+            port = portPart.toInt()
+          }
+        } else if (hostToken.contains(':')) {
+          literalIp = literalIp ?: hostToken
+        } else {
+          host = hostToken.ifBlank { null }
+        }
+      }
+
+      val ip = literalIp?.ifBlank { null }
+      return Address(scheme, host, ip, port, path)
     }
   }
 

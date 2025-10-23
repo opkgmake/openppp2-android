@@ -120,6 +120,39 @@ public abstract class VPNConnection extends VpnService {
         return gw;
     }
 
+    private void vpn_add_route(VpnService.Builder builder, String route) {
+        if (builder == null || X.is_empty(route)) {
+            return;
+        }
+
+        int index = route.indexOf('/');
+        if (index <= 0) {
+            return;
+        }
+
+        String address = route.substring(0, index).trim();
+        String prefix_string = route.substring(index + 1).trim();
+        if (X.is_empty(address) || X.is_empty(prefix_string)) {
+            return;
+        }
+
+        try {
+            int prefix = Integer.parseInt(prefix_string);
+            InetAddress inet_address = IPAddressX.string_to_address(address);
+            if (inet_address == null) {
+                return;
+            }
+
+            int max_prefix = IPAddressX.address_is_v4_address(inet_address) ? 32 : 128;
+            if (prefix < 0 || prefix > max_prefix) {
+                return;
+            }
+
+            builder.addRoute(address, prefix);
+        } catch (Throwable ignored) {
+        }
+    }
+
     // Preparatory processing of vpn operation.
     private int prepare_x(VpnService service, NetworkListener network_listener) {
         VpnService.Builder builder = new VpnService.Builder();
@@ -178,6 +211,9 @@ public abstract class VPNConnection extends VpnService {
                 for (String dns_address : dns_addresses) {
                     InetAddress dns_ip = IPAddressX.string_to_address(dns_address);
                     if (dns_ip != null) {
+                        if (IPAddressX.address_is_v6_address(dns_ip)) {
+                            builder.allowFamily(OsConstants.AF_INET6);
+                        }
                         builder.addDnsServer(dns_ip);
                     }
                 }
@@ -186,7 +222,8 @@ public abstract class VPNConnection extends VpnService {
 
         // Configure basic attributes of the network interface.
         int prefix = IPAddressX.netmask_to_prefix(config.SubnetAddress);
-        builder.setMtu(Macro.MTU);
+        int mtu = config.Mtu > 0 ? config.Mtu : Macro.MTU;
+        builder.setMtu(mtu);
         builder.setBlocking(true);
         builder.allowFamily(OsConstants.AF_INET);
         builder.addAddress(config.IPAddress, prefix);
@@ -194,9 +231,23 @@ public abstract class VPNConnection extends VpnService {
 
         // Set the VPN route table.
         builder.addRoute(cidr, prefix);
-        builder.addRoute("0.0.0.0", 0);
-        builder.addRoute("0.0.0.0", 1);
-        builder.addRoute("128.0.0.0", 1);
+        Set<String> ipv4_routes = config.IPv4Routes;
+        if (!X.is_empty(ipv4_routes)) {
+            for (String route : ipv4_routes) {
+                vpn_add_route(builder, route);
+            }
+        }
+
+        if (config.EnableIPv6 && !X.is_empty(config.IPv6Address)) {
+            builder.allowFamily(OsConstants.AF_INET6);
+            builder.addAddress(config.IPv6Address, config.IPv6PrefixLength);
+            Set<String> ipv6_routes = config.IPv6Routes;
+            if (!X.is_empty(ipv6_routes)) {
+                for (String route : ipv6_routes) {
+                    vpn_add_route(builder, route);
+                }
+            }
+        }
 
         // Automatically set the Http Proxy option for current systems (only supported on >= Android 10).
         if (config.AtomicHttpProxySet) {

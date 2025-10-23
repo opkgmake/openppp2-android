@@ -30,6 +30,14 @@ public class VPNLinkConfiguration {
     @Expose(serialize = true, deserialize = true)
     public final VPNConfiguration VPNConfiguration = new VPNConfiguration();
 
+    @SerializedName("IPv4Routes")
+    @Expose(serialize = true, deserialize = true)
+    public final Set<String> IPv4Routes = new HashSet<String>();
+
+    @SerializedName("IPv6Routes")
+    @Expose(serialize = true, deserialize = true)
+    public final Set<String> IPv6Routes = new HashSet<String>();
+
     @SerializedName("IPAddress")
     @Expose(serialize = true, deserialize = true)
     public String IPAddress;
@@ -77,6 +85,22 @@ public class VPNLinkConfiguration {
     @SerializedName("AllowNoActivityNetwork")
     @Expose(serialize = true, deserialize = true)
     public boolean AllowNoActivityNetwork = true;
+
+    @SerializedName("EnableIPv6")
+    @Expose(serialize = true, deserialize = true)
+    public boolean EnableIPv6;
+
+    @SerializedName("IPv6Address")
+    @Expose(serialize = true, deserialize = true)
+    public String IPv6Address;
+
+    @SerializedName("IPv6PrefixLength")
+    @Expose(serialize = true, deserialize = true)
+    public int IPv6PrefixLength = 64;
+
+    @SerializedName("Mtu")
+    @Expose(serialize = true, deserialize = true)
+    public int Mtu = Macro.MTU;
 
     @NonNull
     public String bypass_ip_list_do_load_all() {
