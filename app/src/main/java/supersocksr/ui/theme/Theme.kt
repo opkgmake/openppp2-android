@@ -1,8 +1,6 @@
 package supersocksr.ppp.android.ui.theme
 
-import android.app.Activity
 import android.os.Build
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
@@ -13,32 +11,40 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
 private val DarkColorScheme = darkColorScheme(
-  primary = Purple80,
-  secondary = PurpleGrey80,
-  tertiary = Pink80
+  primary = ElectricBlue,
+  onPrimary = Color(0xFF001018),
+  secondary = NeonGreen,
+  onSecondary = Color(0xFF00210E),
+  tertiary = Ember,
+  onTertiary = Color(0xFF230800),
+  background = Midnight,
+  onBackground = Snow,
+  surface = Obsidian,
+  onSurface = Snow,
+  surfaceVariant = Graphite,
+  onSurfaceVariant = Mist,
+  outline = Steel,
+  error = SignalRed,
+  onError = Color(0xFF180003)
 )
 
 private val LightColorScheme = lightColorScheme(
-  primary = Purple40,
-  secondary = PurpleGrey40,
-  tertiary = Pink40,
-
-  /* Other default colors to override*/
-  background = Color(0xFFFFFBFE),
-  surface = Color(0xFFFFFBFE),
-  onPrimary = Color.White,
-  onSecondary = Color.White,
-  onTertiary = Color.White,
-  onBackground = Color(0xFF1C1B1F),
-  onSurface = Color(0xFF1C1B1F),
-
+  primary = ElectricBlue,
+  onPrimary = Color.Black,
+  secondary = NeonGreen,
+  onSecondary = Color.Black,
+  tertiary = Ember,
+  onTertiary = Color.Black,
+  background = Snow,
+  onBackground = Color(0xFF101217),
+  surface = Color(0xFFF8F9FA),
+  onSurface = Color(0xFF101217)
 )
 
 @Composable
 fun Openppp2Theme(
-  darkTheme: Boolean = isSystemInDarkTheme(),
-  // Dynamic color is available on Android 12+
-  dynamicColor: Boolean = true,
+  darkTheme: Boolean = true,
+  dynamicColor: Boolean = false,
   content: @Composable () -> Unit
 ) {
   val colorScheme = when {
