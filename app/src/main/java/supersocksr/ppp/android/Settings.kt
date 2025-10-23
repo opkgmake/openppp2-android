@@ -160,7 +160,7 @@ class Settings(val context: Context, private val preferences: SharedPreferences)
           onClick = {
             try {
               preferences.edit().putString(TEST_LINK_KEY, link.text.trim()).apply()
-              preferences.edit().putInt(TIMEOUT_KEY, timeout.text.trim().toInt()).apply()
+              preferences.edit().putLong(TIMEOUT_KEY, timeout.text.trim().toLong()).apply()
               onDismiss()
             } catch (e: Exception) {
               Toast.makeText(context, e.message, Toast.LENGTH_SHORT).show()
